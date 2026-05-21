@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AutoMoGuDing SaaS（工学云打卡管理平台）是一个面向多用户托管的 Web 系统，支持自动打卡、日报 / 周报 / 月报提交，以及 AI 生成报告内容。代码与注释以中文为主。
+AutoMoGuDing SaaS（工学云打卡管理平台）是一个面向多用户托管的 Web 系统，支持自动打卡、缺卡记录筛选、按类型补卡、日报 / 周报 / 月报提交，以及 AI 生成报告内容。代码与注释以中文为主。
 
 核心技术栈：
 
@@ -45,7 +45,17 @@ docker compose up -d --build
 
 ### Lint / Test
 
-当前仓库中未发现标准化的 lint、测试或单测脚本。更新仓库说明时不要补写不存在的命令，也不要添加“运行单个测试”的占位说明。
+当前仓库已有后端单元测试，但没有标准化 lint 脚本，也没有前端测试脚本。
+
+```bash
+python -m unittest discover -s tests
+python -m compileall server
+
+cd web
+npm run build
+```
+
+更新仓库说明时不要补写不存在的 `npm test`、`npm run lint` 等命令。
 
 ## Architecture
 
@@ -59,8 +69,17 @@ docker compose up -d --build
 ### Dual API surfaces
 
 - `server/api.py` 同时承载管理端 API 与 `/app/*` 用户端 API。
-- 管理端 API 面向管理员、操作员、只读角色，负责用户管理、批量执行、审计日志、通知设置、AI 测试、地理编码等能力。
-- `/app/*` 用户端 API 面向终端用户，负责注册 / 登录、绑定工学云账号、修改自身配置、手动执行任务，以及生成和提交日报。
+- 管理端 API 面向管理员、操作员、只读角色，负责用户管理、批量执行、审计日志、通知设置、AI 测试、地理编码、缺卡查询和补卡等能力。
+- `/app/*` 用户端 API 面向终端用户，负责注册 / 登录、绑定工学云账号、修改自身配置、手动执行任务、缺卡查询、补卡，以及生成和提交日报。
+
+补卡相关接口：
+
+- `GET /app/clock-in/missing-days`
+- `POST /app/clock-in/makeup`
+- `POST /app/clock-in/makeup-all`
+- `GET /users/{user_id}/clock-in/missing-days`
+- `POST /users/{user_id}/clock-in/makeup`
+- `POST /users/{user_id}/clock-in/makeup-all`
 
 ### Runtime bridge and task execution
 
@@ -68,6 +87,7 @@ docker compose up -d --build
 - `server/user_runtime.py` 是持久化模型与执行配置之间的桥接层：它把 `User` 转成任务运行所需的配置，同时把远端登录态、实习计划、通知配置等运行时信息同步回数据库。
 - `server/scheduler.py` 为单用户注册定时打卡 / 报告任务；`server/queue_worker.py` 负责批量任务队列，支持并发、暂停、取消和重试回退。
 - 定时执行、批量执行和手动执行最终都会进入 `server/task_runner.py`，由它协调工学云接口、AI 报告生成、图片上传和消息推送。
+- `server/clockin_backfill.py` 负责打卡记录归一化和待补卡日期筛选。补卡以 `target_type` 区分 `START` / `END`，一次只补一种类型；即使某天同时缺上班和下班，也不会在选择一种类型时自动补另一种。
 
 ### Frontend structure
 

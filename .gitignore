@@ -63,4 +63,6 @@ server/models_onnx/
 .DS_Store
 Thumbs.db
 
-docs/
+docs/*
+!docs/
+!docs/current-features.md
