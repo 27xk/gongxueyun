@@ -71,6 +71,12 @@
                 <el-button type="warning" :loading="clockInMakeupLoading" :disabled="!clockInTargetDates.length" @click="makeupClockIn">补选中</el-button>
                 <el-button type="danger" :loading="clockInMakeupAllLoading" :disabled="!filteredClockInPeriodOptions.length" @click="makeupAllClockIn">全部待补</el-button>
               </div>
+              <el-progress
+                v-if="clockInMakeupAllLoading || clockInMakeupAllPercent > 0"
+                class="clockin-backfill-progress"
+                :percentage="clockInMakeupAllPercent"
+                :status="clockInMakeupAllPercent >= 100 ? 'success' : undefined"
+              />
               <div class="clockin-backfill-hint">
                 已获取 {{ clockInRecordCount }} 条打卡记录，{{ clockInMakeupTypeLabel }}待补 {{ filteredClockInPeriodOptions.length }} 天，已选 {{ clockInTargetDates.length }} 天
               </div>
@@ -128,23 +134,36 @@
               <el-checkbox v-for="d in weekdayOptions" :key="d.value" :value="d.value">{{ d.label }}</el-checkbox>
             </el-checkbox-group>
           </el-form-item>
-          <el-form-item v-if="form.reportSettings.daily.enabled" label="补交日期">
-            <el-select v-model="reportTargets.daily" :loading="reportPeriodLoading.daily" filterable placeholder="选择未提交日报日期">
-              <el-option v-for="item in reportPeriodOptions.daily" :key="item.value" :label="item.label" :value="item.value" />
-            </el-select>
+          <el-form-item label="补交日期">
+            <div class="report-backfill">
+              <div class="report-backfill-row">
+                <el-select v-model="reportTargets.daily" :loading="reportPeriodLoading.daily" filterable placeholder="选择未提交日报日期">
+                  <el-option v-for="item in reportPeriodOptions.daily" :key="item.value" :label="item.label" :value="item.value" />
+                </el-select>
+                <el-button :loading="reportPeriodLoading.daily" :disabled="!isEdit || !!reportMakeupAllLoading" @click="loadReportPeriodOptions('daily')">刷新待补</el-button>
+                <el-button type="danger" :loading="reportMakeupAllLoading === 'daily'" :disabled="!isEdit || !!reportRunLoading || !!reportActionLoading || (!!reportMakeupAllLoading && reportMakeupAllLoading !== 'daily') || !reportPendingCount('daily')" @click="makeupAllReports('daily')">补全部日报</el-button>
+              </div>
+              <el-progress
+                v-if="reportMakeupAllInProgress('daily')"
+                class="report-backfill-progress"
+                :percentage="reportMakeupAllPercent"
+                :status="reportMakeupAllPercent >= 100 ? 'success' : undefined"
+              />
+              <div class="report-backfill-hint">日报待补 {{ reportPendingCount('daily') }} 个周期</div>
+            </div>
           </el-form-item>
-          <el-form-item v-if="form.reportSettings.daily.enabled" label="日报预览">
+          <el-form-item label="日报预览">
             <div class="report-preview">
               <div class="report-preview-meta">
                 <div>字数：{{ dailyCount }} / 1000</div>
                 <div class="report-preview-actions">
-                  <el-button size="small" :disabled="!isEdit || !!reportRunLoading || !reportTargets.daily" :loading="reportActionLoading === 'daily_generate'" @click="generateReport('daily')">
+                  <el-button size="small" :disabled="!isEdit || !!reportRunLoading || !!reportMakeupAllLoading || !reportTargets.daily" :loading="reportActionLoading === 'daily_generate'" @click="generateReport('daily')">
                     AI生成日报
                   </el-button>
                   <el-button
                     size="small"
                     type="primary"
-                    :disabled="!isEdit || !!reportRunLoading || !reportTargets.daily || !String(reportPreview.daily || '').trim()"
+                    :disabled="!isEdit || !!reportRunLoading || !!reportMakeupAllLoading || !reportTargets.daily || !String(reportPreview.daily || '').trim()"
                     :loading="reportActionLoading === 'daily_submit'"
                     @click="submitReport('daily')"
                   >
@@ -153,7 +172,7 @@
                   <el-button
                     size="small"
                     type="success"
-                    :disabled="!isEdit || !!reportRunLoading || !reportTargets.daily || aiDailyLoading || submitDailyLoading"
+                    :disabled="!isEdit || !!reportRunLoading || !!reportMakeupAllLoading || !reportTargets.daily || aiDailyLoading || submitDailyLoading"
                     :loading="reportRunLoading === 'daily_report'"
                     @click="runReportNow('daily_report')"
                   >
@@ -181,23 +200,36 @@
           <el-form-item v-if="form.reportSettings.weekly.enabled" label="提交时刻">
             <el-time-select v-model="form.reportSettings.weekly.submitAt" start="00:00" step="00:01" end="23:59" />
           </el-form-item>
-          <el-form-item v-if="form.reportSettings.weekly.enabled" label="补交周">
-            <el-select v-model="reportTargets.weekly" :loading="reportPeriodLoading.weekly" filterable placeholder="选择未提交周报周期">
-              <el-option v-for="item in reportPeriodOptions.weekly" :key="item.value" :label="item.label" :value="item.value" />
-            </el-select>
+          <el-form-item label="补交周">
+            <div class="report-backfill">
+              <div class="report-backfill-row">
+                <el-select v-model="reportTargets.weekly" :loading="reportPeriodLoading.weekly" filterable placeholder="选择未提交周报周期">
+                  <el-option v-for="item in reportPeriodOptions.weekly" :key="item.value" :label="item.label" :value="item.value" />
+                </el-select>
+                <el-button :loading="reportPeriodLoading.weekly" :disabled="!isEdit || !!reportMakeupAllLoading" @click="loadReportPeriodOptions('weekly')">刷新待补</el-button>
+                <el-button type="danger" :loading="reportMakeupAllLoading === 'weekly'" :disabled="!isEdit || !!reportRunLoading || !!reportActionLoading || (!!reportMakeupAllLoading && reportMakeupAllLoading !== 'weekly') || !reportPendingCount('weekly')" @click="makeupAllReports('weekly')">补全部周报</el-button>
+              </div>
+              <el-progress
+                v-if="reportMakeupAllInProgress('weekly')"
+                class="report-backfill-progress"
+                :percentage="reportMakeupAllPercent"
+                :status="reportMakeupAllPercent >= 100 ? 'success' : undefined"
+              />
+              <div class="report-backfill-hint">周报待补 {{ reportPendingCount('weekly') }} 个周期</div>
+            </div>
           </el-form-item>
-          <el-form-item v-if="form.reportSettings.weekly.enabled" label="周报预览">
+          <el-form-item label="周报预览">
             <div class="report-preview">
               <div class="report-preview-meta">
                 <div>字数：{{ weeklyCount }} / 1000</div>
                 <div class="report-preview-actions">
-                  <el-button size="small" :disabled="!isEdit || !!reportRunLoading || !reportTargets.weekly" :loading="reportActionLoading === 'weekly_generate'" @click="generateReport('weekly')">
+                  <el-button size="small" :disabled="!isEdit || !!reportRunLoading || !!reportMakeupAllLoading || !reportTargets.weekly" :loading="reportActionLoading === 'weekly_generate'" @click="generateReport('weekly')">
                     AI生成周报
                   </el-button>
                   <el-button
                     size="small"
                     type="primary"
-                    :disabled="!isEdit || !!reportRunLoading || !reportTargets.weekly || !String(reportPreview.weekly || '').trim()"
+                    :disabled="!isEdit || !!reportRunLoading || !!reportMakeupAllLoading || !reportTargets.weekly || !String(reportPreview.weekly || '').trim()"
                     :loading="reportActionLoading === 'weekly_submit'"
                     @click="submitReport('weekly')"
                   >
@@ -206,7 +238,7 @@
                   <el-button
                     size="small"
                     type="success"
-                    :disabled="!isEdit || !!reportRunLoading || !reportTargets.weekly"
+                    :disabled="!isEdit || !!reportRunLoading || !!reportMakeupAllLoading || !reportTargets.weekly"
                     :loading="reportRunLoading === 'weekly_report'"
                     @click="runReportNow('weekly_report')"
                   >
@@ -228,23 +260,36 @@
           <el-form-item v-if="form.reportSettings.monthly.enabled" label="提交时刻">
             <el-time-select v-model="form.reportSettings.monthly.submitAt" start="00:00" step="00:01" end="23:59" />
           </el-form-item>
-          <el-form-item v-if="form.reportSettings.monthly.enabled" label="补交月份">
-            <el-select v-model="reportTargets.monthly" :loading="reportPeriodLoading.monthly" filterable placeholder="选择未提交月报月份">
-              <el-option v-for="item in reportPeriodOptions.monthly" :key="item.value" :label="item.label" :value="item.value" />
-            </el-select>
+          <el-form-item label="补交月份">
+            <div class="report-backfill">
+              <div class="report-backfill-row">
+                <el-select v-model="reportTargets.monthly" :loading="reportPeriodLoading.monthly" filterable placeholder="选择未提交月报月份">
+                  <el-option v-for="item in reportPeriodOptions.monthly" :key="item.value" :label="item.label" :value="item.value" />
+                </el-select>
+                <el-button :loading="reportPeriodLoading.monthly" :disabled="!isEdit || !!reportMakeupAllLoading" @click="loadReportPeriodOptions('monthly')">刷新待补</el-button>
+                <el-button type="danger" :loading="reportMakeupAllLoading === 'monthly'" :disabled="!isEdit || !!reportRunLoading || !!reportActionLoading || (!!reportMakeupAllLoading && reportMakeupAllLoading !== 'monthly') || !reportPendingCount('monthly')" @click="makeupAllReports('monthly')">补全部月报</el-button>
+              </div>
+              <el-progress
+                v-if="reportMakeupAllInProgress('monthly')"
+                class="report-backfill-progress"
+                :percentage="reportMakeupAllPercent"
+                :status="reportMakeupAllPercent >= 100 ? 'success' : undefined"
+              />
+              <div class="report-backfill-hint">月报待补 {{ reportPendingCount('monthly') }} 个周期</div>
+            </div>
           </el-form-item>
-          <el-form-item v-if="form.reportSettings.monthly.enabled" label="月报预览">
+          <el-form-item label="月报预览">
             <div class="report-preview">
               <div class="report-preview-meta">
                 <div>字数：{{ monthlyCount }} / 1000</div>
                 <div class="report-preview-actions">
-                  <el-button size="small" :disabled="!isEdit || !!reportRunLoading || !reportTargets.monthly" :loading="reportActionLoading === 'monthly_generate'" @click="generateReport('monthly')">
+                  <el-button size="small" :disabled="!isEdit || !!reportRunLoading || !!reportMakeupAllLoading || !reportTargets.monthly" :loading="reportActionLoading === 'monthly_generate'" @click="generateReport('monthly')">
                     AI生成月报
                   </el-button>
                   <el-button
                     size="small"
                     type="primary"
-                    :disabled="!isEdit || !!reportRunLoading || !reportTargets.monthly || !String(reportPreview.monthly || '').trim()"
+                    :disabled="!isEdit || !!reportRunLoading || !!reportMakeupAllLoading || !reportTargets.monthly || !String(reportPreview.monthly || '').trim()"
                     :loading="reportActionLoading === 'monthly_submit'"
                     @click="submitReport('monthly')"
                   >
@@ -253,7 +298,7 @@
                   <el-button
                     size="small"
                     type="success"
-                    :disabled="!isEdit || !!reportRunLoading || !reportTargets.monthly"
+                    :disabled="!isEdit || !!reportRunLoading || !!reportMakeupAllLoading || !reportTargets.monthly"
                     :loading="reportRunLoading === 'monthly_report'"
                     @click="runReportNow('monthly_report')"
                   >
@@ -356,6 +401,7 @@ const submitDailyLoading = ref(false)
 const clockInPeriodLoading = ref(false)
 const clockInMakeupLoading = ref(false)
 const clockInMakeupAllLoading = ref(false)
+const clockInMakeupAllPercent = ref(0)
 const clockInMakeupType = ref('START')
 const clockInPeriodOptions = ref([])
 const clockInTargetDates = ref([])
@@ -365,6 +411,11 @@ const reportActionLoading = ref('')
 const reportPreview = reactive({ daily: '', weekly: '', monthly: '' })
 const reportPeriodLoading = reactive({ daily: false, weekly: false, monthly: false })
 const reportPeriodOptions = reactive({ daily: [], weekly: [], monthly: [] })
+const reportMakeupAllLoading = ref('')
+const reportMakeupAllPercent = ref(0)
+const reportMakeupAllProgressKey = ref('')
+const CLOCKIN_MAKEUP_REQUEST_TIMEOUT = 0
+const REPORT_MAKEUP_REQUEST_TIMEOUT = 0
 const _today = new Date()
 const _pad2 = (n) => String(n).padStart(2, '0')
 const _todayDate = `${_today.getFullYear()}-${_pad2(_today.getMonth() + 1)}-${_pad2(_today.getDate())}`
@@ -372,6 +423,72 @@ const _todayMonth = `${_today.getFullYear()}-${_pad2(_today.getMonth() + 1)}`
 const reportTargets = reactive({ daily: _todayDate, weekly: _todayDate, monthly: _todayMonth })
 let geocodeSearchAbort = null
 let geocodeReverseAbort = null
+let clockInMakeupAllTimer = null
+let reportMakeupAllTimer = null
+
+const resetClockInMakeupAllProgress = () => {
+  if (clockInMakeupAllTimer) {
+    clearInterval(clockInMakeupAllTimer)
+    clockInMakeupAllTimer = null
+  }
+  clockInMakeupAllPercent.value = 0
+}
+
+const startClockInMakeupAllProgress = (total) => {
+  resetClockInMakeupAllProgress()
+  const count = Math.max(Number(total || 0), 1)
+  const estimatedMs = Math.max(count * 2200, 3000)
+  const startedAt = Date.now()
+  clockInMakeupAllPercent.value = 3
+  clockInMakeupAllTimer = setInterval(() => {
+    const elapsed = Date.now() - startedAt
+    clockInMakeupAllPercent.value = Math.min(95, Math.max(3, Math.round((elapsed / estimatedMs) * 95)))
+  }, 300)
+}
+
+const finishClockInMakeupAllProgress = () => {
+  if (clockInMakeupAllTimer) {
+    clearInterval(clockInMakeupAllTimer)
+    clockInMakeupAllTimer = null
+  }
+  clockInMakeupAllPercent.value = 100
+  window.setTimeout(() => {
+    if (!clockInMakeupAllLoading.value) clockInMakeupAllPercent.value = 0
+  }, 1200)
+}
+
+const resetReportMakeupAllProgress = () => {
+  if (reportMakeupAllTimer) {
+    clearInterval(reportMakeupAllTimer)
+    reportMakeupAllTimer = null
+  }
+  reportMakeupAllPercent.value = 0
+  reportMakeupAllProgressKey.value = ''
+}
+
+const startReportMakeupAllProgress = (key, total) => {
+  resetReportMakeupAllProgress()
+  const count = Math.max(Number(total || 0), 1)
+  const estimatedMs = Math.max(count * 4500, 5000)
+  const startedAt = Date.now()
+  reportMakeupAllProgressKey.value = key
+  reportMakeupAllPercent.value = 3
+  reportMakeupAllTimer = setInterval(() => {
+    const elapsed = Date.now() - startedAt
+    reportMakeupAllPercent.value = Math.min(95, Math.max(3, Math.round((elapsed / estimatedMs) * 95)))
+  }, 300)
+}
+
+const finishReportMakeupAllProgress = () => {
+  if (reportMakeupAllTimer) {
+    clearInterval(reportMakeupAllTimer)
+    reportMakeupAllTimer = null
+  }
+  reportMakeupAllPercent.value = 100
+  window.setTimeout(() => {
+    if (!reportMakeupAllLoading.value) resetReportMakeupAllProgress()
+  }, 1200)
+}
 
 const flushUiMessage = async () => {
   await nextTick()
@@ -861,6 +978,8 @@ const submitDailyReport = async () => {
 const reportLabelMap = { daily: '日报', weekly: '周报', monthly: '月报' }
 const reportTaskMap = { daily: 'daily_report', weekly: 'weekly_report', monthly: 'monthly_report' }
 const clockInMakeupTypeLabel = computed(() => (clockInMakeupType.value === 'END' ? '下班' : '上班'))
+const reportPendingCount = (key) => (Array.isArray(reportPeriodOptions[key]) ? reportPeriodOptions[key].length : 0)
+const reportMakeupAllInProgress = (key) => reportMakeupAllProgressKey.value === key && (reportMakeupAllLoading.value === key || reportMakeupAllPercent.value > 0)
 const filteredClockInPeriodOptions = computed(() => {
   const options = Array.isArray(clockInPeriodOptions.value) ? clockInPeriodOptions.value : []
   return options
@@ -913,7 +1032,7 @@ const makeupClockIn = async () => {
     const res = await http.post(`/users/${route.params.id}/clock-in/makeup`, {
       target_dates: targetDates,
       target_type: clockInMakeupType.value,
-    })
+    }, { timeout: CLOCKIN_MAKEUP_REQUEST_TIMEOUT })
     const result = res.data?.result || {}
     if (result.status === 'success') {
       notifySuccess(result.message || '补卡完成')
@@ -937,12 +1056,13 @@ const makeupAllClockIn = async () => {
     return
   }
   clockInMakeupAllLoading.value = true
+  startClockInMakeupAllProgress(filteredClockInPeriodOptions.value.length)
   try {
     notifyInfo('正在补全部待补日期')
     await flushUiMessage()
     const res = await http.post(`/users/${route.params.id}/clock-in/makeup-all`, {
       target_type: clockInMakeupType.value,
-    })
+    }, { timeout: CLOCKIN_MAKEUP_REQUEST_TIMEOUT })
     const result = res.data?.result || {}
     if (result.status === 'success') {
       notifySuccess(result.message || '全部补卡完成')
@@ -951,8 +1071,10 @@ const makeupAllClockIn = async () => {
     } else {
       notifyError(result.message || '全部补卡失败')
     }
+    finishClockInMakeupAllProgress()
     await loadClockInMissingDays()
   } catch (e) {
+    resetClockInMakeupAllProgress()
     notifyError(resolveErrorMessage(e, '全部补卡失败'))
   } finally {
     clockInMakeupAllLoading.value = false
@@ -1042,6 +1164,41 @@ const submitReport = async (key) => {
     notifyError(resolveErrorMessage(e, `${label}提交失败`))
   } finally {
     reportActionLoading.value = ''
+  }
+}
+
+const makeupAllReports = async (key) => {
+  if (!isEdit.value) return
+  const label = reportLabelMap[key] || '报告'
+  const total = reportPendingCount(key)
+  if (!total) {
+    notifyWarning(`暂无待补交${label}周期`)
+    return
+  }
+  reportMakeupAllLoading.value = key
+  startReportMakeupAllProgress(key, total)
+  try {
+    notifyInfo(`正在补交全部待补${label}`)
+    await flushUiMessage()
+    const res = await http.post(`/users/${route.params.id}/reports/${key}/makeup-all`, null, {
+      timeout: REPORT_MAKEUP_REQUEST_TIMEOUT,
+    })
+    const result = res.data?.result || {}
+    if (result.status === 'success') {
+      notifySuccess(result.message || `全部${label}补交完成`)
+    } else if (result.status === 'skip') {
+      notifyWarning(result.message || `已跳过${label}补交`)
+    } else {
+      notifyError(result.message || `全部${label}补交失败`)
+    }
+    finishReportMakeupAllProgress()
+    await fetchUser()
+    await loadReportPeriodOptions(key)
+  } catch (e) {
+    resetReportMakeupAllProgress()
+    notifyError(resolveErrorMessage(e, `全部${label}补交失败`))
+  } finally {
+    reportMakeupAllLoading.value = ''
   }
 }
 
@@ -1198,6 +1355,8 @@ onMounted(() => {
 })
 onUnmounted(() => {
   if (addrStructTimer) clearTimeout(addrStructTimer)
+  resetClockInMakeupAllProgress()
+  resetReportMakeupAllProgress()
   if (geocodeSearchAbort) geocodeSearchAbort.abort()
   if (geocodeReverseAbort) geocodeReverseAbort.abort()
   if (mapInstance.value) {
@@ -1259,7 +1418,32 @@ onUnmounted(() => {
 .clockin-backfill-row :deep(.clockin-type-select) {
   flex: 0 0 120px;
 }
+.clockin-backfill-progress {
+  margin-top: 10px;
+  max-width: 520px;
+}
 .clockin-backfill-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.report-backfill {
+  width: 100%;
+}
+.report-backfill-row {
+  width: 100%;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.report-backfill-row :deep(.el-select) {
+  flex: 1 1 240px;
+}
+.report-backfill-progress {
+  margin-top: 10px;
+  max-width: 520px;
+}
+.report-backfill-hint {
   margin-top: 8px;
   font-size: 12px;
   color: var(--el-text-color-secondary);

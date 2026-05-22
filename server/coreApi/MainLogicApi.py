@@ -31,6 +31,13 @@ class ApiClient:
         "host": "api.moguding.net:9000",
     }
 
+    @staticmethod
+    def _is_token_expired_response(code, msg: str) -> bool:
+        text = str(msg or "")
+        if code in (401, 403, 7001, 7002):
+            return True
+        return text in {"token失效", "Token失效", "token已失效", "Token已失效", "登录已失效", "请重新登录"}
+
     def __init__(self, config: ConfigManager):
         """
         初始化ApiClient实例。
@@ -79,7 +86,7 @@ class ApiClient:
                     return rsp
 
                 # Token失效处理
-                if "token失效" in msg:
+                if self._is_token_expired_response(code, msg):
                     if attempt < self.max_retries - 1:
                         wait_time = 1 * (2 ** attempt)
                         logger.warning(f"Token失效，正在重新登录... (等待 {wait_time}s)")

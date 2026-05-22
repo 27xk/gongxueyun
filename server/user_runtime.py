@@ -40,6 +40,9 @@ def runtime_login_valid(user_info: Dict[str, Any] | None, now_ms: int | None = N
     except Exception:
         return True
 
+    if expired_ms < 10_000_000_000:
+        expired_ms *= 1000
+
     if now_ms is None:
         now_ms = int(time.time() * 1000)
     return expired_ms > int(now_ms)

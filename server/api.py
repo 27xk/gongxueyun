@@ -30,6 +30,19 @@ router = APIRouter()
 
 NOMINATIM_BASE_URL = "https://nominatim.openstreetmap.org"
 NOTIFICATION_SETTINGS_KEY = "notifications"
+DEFAULT_REPORT_MAKEUP_BATCH_DELAY_SECONDS = 2.0
+MAX_REPORT_MAKEUP_BATCH_DELAY_SECONDS = 30.0
+
+
+def _report_makeup_batch_delay_seconds() -> float:
+    raw = os.getenv("REPORT_MAKEUP_BATCH_DELAY_SECONDS") or os.getenv("CLOCKIN_MAKEUP_BATCH_DELAY_SECONDS") or str(DEFAULT_REPORT_MAKEUP_BATCH_DELAY_SECONDS)
+    try:
+        value = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return DEFAULT_REPORT_MAKEUP_BATCH_DELAY_SECONDS
+    if value < 0:
+        return 0.0
+    return min(value, MAX_REPORT_MAKEUP_BATCH_DELAY_SECONDS)
 
 
 def _notification_settings_row(session: Session) -> SystemSetting | None:
@@ -498,6 +511,7 @@ def _get_missing_clockin_days_for_user(user: User) -> Dict[str, Any]:
         start_date,
         end_date,
         scheduled_weekdays=_clockin_schedule_weekdays(config_data),
+        respect_scheduled_weekdays=False,
     )
     return {
         "ok": True,
@@ -691,6 +705,84 @@ def _generate_report_content_for_user(user: User, report_key: str, target_period
             (submitted.get("data", []) if isinstance(submitted, dict) else [])[:4],
         )
     return {"config_data": config_data, "title": title, "content": content, "api_client": api_client, "config": config, "meta": meta}
+
+
+def _makeup_all_reports_for_user(user: User, report_key: str) -> tuple[Dict[str, Any], Dict[str, Any], List[str]]:
+    missing = _get_missing_report_periods_for_user(user, report_key)
+    target_periods = [item.get("value") for item in missing.get("options", []) if item.get("value")]
+    meta = _get_report_meta(report_key)
+    task_name = meta["task_name"]
+    config_data = user_to_config(user)
+    if not target_periods:
+        result = {
+            "status": "skip",
+            "message": f"暂无待补交{task_name}周期",
+            "task_type": f"{task_name}补交",
+            "details": {"补交周期数": 0, "成功": 0, "失败": 0},
+            "items": [],
+        }
+        apply_execution_results_to_user(user, [result], config_data)
+        return result, config_data, []
+
+    items: List[Dict[str, Any]] = []
+    latest_config_data = config_data
+    delay = _report_makeup_batch_delay_seconds()
+    for index, period in enumerate(target_periods):
+        if index > 0 and delay > 0:
+            time.sleep(delay)
+        try:
+            generated = _generate_report_content_for_user(user, report_key, period, generate_content=True)
+            report_info = _build_report_info(
+                api_client=generated["api_client"],
+                config=generated["config"],
+                meta=generated["meta"],
+                content=generated["content"],
+                target_period=period,
+            )
+            generated["api_client"].submit_report(report_info)
+            latest_config_data = generated["config_data"]
+            items.append(
+                {
+                    "status": "success",
+                    "message": f"{period} {task_name}补交完成",
+                    "task_type": f"{task_name}补交",
+                    "target_period": period,
+                    "title": report_info.get("title"),
+                }
+            )
+        except Exception as e:
+            items.append(
+                {
+                    "status": "fail",
+                    "message": f"{period} {task_name}补交失败: {str(e)}",
+                    "task_type": f"{task_name}补交",
+                    "target_period": period,
+                }
+            )
+
+    failed = [item for item in items if item.get("status") == "fail"]
+    succeeded = [item for item in items if item.get("status") == "success"]
+    status = "fail" if failed else ("success" if succeeded else "skip")
+    if failed:
+        message = f"{len(target_periods)} 个{task_name}周期未全部补交完成"
+    elif succeeded:
+        message = f"{len(target_periods)} 个{task_name}周期补交完成"
+    else:
+        message = f"{len(target_periods)} 个{task_name}周期已跳过"
+    result = {
+        "status": status,
+        "message": message,
+        "task_type": f"{task_name}补交",
+        "details": {
+            "补交周期数": len(target_periods),
+            "成功": len(succeeded),
+            "失败": len(failed),
+            "请求间隔秒": delay,
+        },
+        "items": items,
+    }
+    apply_execution_results_to_user(user, [result], latest_config_data)
+    return result, latest_config_data, target_periods
 
 @router.post("/app/auth/register")
 def app_register(request: Request, req: AppRegisterRequest):
@@ -1154,6 +1246,29 @@ def app_submit_report(
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e) or "提交报告失败")
 
+
+@router.post("/app/reports/{report_key}/makeup-all")
+def app_makeup_all_reports(
+    *,
+    report_key: str,
+    session: Session = Depends(get_session),
+    payload: dict = Depends(get_user),
+):
+    app_user = _get_authed_app_user(session=session, payload=payload)
+    user = _get_bound_task_user(session=session, app_user=app_user)
+    try:
+        result, config_data, target_periods = _makeup_all_reports_for_user(user, report_key)
+        sync_runtime_fields_to_user(user, config_data)
+        session.add(AuditLog(actor=str(payload.get("sub")), action="app.report.makeup_all", target_user_id=user.id, detail={"report_key": report_key, "target_periods": target_periods, "status": result.get("status")}))
+        session.add(user)
+        session.commit()
+        return {"ok": result.get("status") != "fail", "result": result, "target_periods": target_periods, "report_key": report_key}
+    except HTTPException:
+        raise
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(e) or "全部补交报告失败")
+
 @router.post("/app/reports/daily/generate")
 def app_generate_daily_report(
     *,
@@ -1163,9 +1278,6 @@ def app_generate_daily_report(
 ):
     app_user = _get_authed_app_user(session=session, payload=payload)
     user = _get_bound_task_user(session=session, app_user=app_user)
-    client_ip = get_client_ip(request)
-    _rate_limit(f"app_daily_gen:{client_ip}:{user.id}", limit=3, per_seconds=60)
-
     config_data = user_to_config(user)
     config = ConfigManager(config=config_data)
     api_client = ApiClient(config)
@@ -1219,9 +1331,6 @@ def app_submit_daily_report(
 ):
     app_user = _get_authed_app_user(session=session, payload=payload)
     user = _get_bound_task_user(session=session, app_user=app_user)
-    client_ip = get_client_ip(request)
-    _rate_limit(f"app_daily_submit:{client_ip}:{user.id}", limit=3, per_seconds=60)
-
     content = (req.content or "").strip()
     if not content:
         raise HTTPException(status_code=400, detail="日报内容不能为空")
@@ -2157,8 +2266,6 @@ def generate_report(
     target_period: Optional[str] = None,
     operator: dict = Depends(get_operator),
 ):
-    client_ip = get_client_ip(request)
-    _rate_limit(f"report_gen:{client_ip}:{user_id}:{report_key}", limit=3, per_seconds=60)
     user = session.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -2183,8 +2290,6 @@ def report_missing_periods(
     report_key: str,
     operator: dict = Depends(get_operator),
 ):
-    client_ip = get_client_ip(request)
-    _rate_limit(f"report_missing:{client_ip}:{user_id}:{report_key}", limit=10, per_seconds=60)
     user = session.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -2206,8 +2311,6 @@ def submit_report_manual(
     req: ReportSubmitRequest,
     operator: dict = Depends(get_operator),
 ):
-    client_ip = get_client_ip(request)
-    _rate_limit(f"report_submit:{client_ip}:{user_id}:{report_key}", limit=3, per_seconds=60)
     content = (req.content or "").strip()
     if not content:
         raise HTTPException(status_code=400, detail="报告内容不能为空")
@@ -2234,6 +2337,32 @@ def submit_report_manual(
         raise HTTPException(status_code=400, detail=str(e) or "提交报告失败")
 
 
+@router.post("/users/{user_id}/reports/{report_key}/makeup-all")
+def makeup_all_reports_manual(
+    *,
+    request: Request,
+    session: Session = Depends(get_session),
+    user_id: int,
+    report_key: str,
+    operator: dict = Depends(get_operator),
+):
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    try:
+        result, config_data, target_periods = _makeup_all_reports_for_user(user, report_key)
+        sync_runtime_fields_to_user(user, config_data)
+        session.add(AuditLog(actor=operator.get("sub"), action="user.report.makeup_all", target_user_id=user_id, detail={"report_key": report_key, "target_periods": target_periods, "status": result.get("status")}))
+        session.add(user)
+        session.commit()
+        return {"ok": result.get("status") != "fail", "result": result, "target_periods": target_periods, "report_key": report_key}
+    except HTTPException:
+        raise
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(e) or "全部补交报告失败")
+
+
 @router.post("/users/{user_id}/reports/daily/generate")
 def generate_daily_report(
     *,
@@ -2242,8 +2371,6 @@ def generate_daily_report(
     user_id: int,
     operator: dict = Depends(get_operator),
 ):
-    client_ip = get_client_ip(request)
-    _rate_limit(f"daily_gen:{client_ip}:{user_id}", limit=3, per_seconds=60)
     user = session.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -2302,8 +2429,6 @@ def submit_daily_report_manual(
     req: ReportSubmitRequest,
     operator: dict = Depends(get_operator),
 ):
-    client_ip = get_client_ip(request)
-    _rate_limit(f"daily_submit:{client_ip}:{user_id}", limit=3, per_seconds=60)
     content = (req.content or "").strip()
     if not content:
         raise HTTPException(status_code=400, detail="日报内容不能为空")

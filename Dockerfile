@@ -12,6 +12,14 @@ RUN cd web && npm run build
 FROM python:3.10-slim
 WORKDIR /app
 
+ARG BUILD_DATE=""
+ARG BUILD_VERSION=""
+ARG VCS_REF=""
+
+LABEL org.opencontainers.image.created=$BUILD_DATE \
+      org.opencontainers.image.version=$BUILD_VERSION \
+      org.opencontainers.image.revision=$VCS_REF
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \

@@ -3,6 +3,7 @@ import os
 import json
 import random
 import threading
+import time
 from datetime import datetime, timedelta, time as datetime_time
 from typing import Dict, List, Optional, Any, Callable
 
@@ -30,6 +31,85 @@ from server.util.LoggerContext import _log_ctx
 from sqlmodel import Session
 
 logger = logging.getLogger("server.task_runner")
+
+DEFAULT_CLOCKIN_MAKEUP_BATCH_DELAY_SECONDS = 2.0
+MAX_CLOCKIN_MAKEUP_BATCH_DELAY_SECONDS = 30.0
+DEFAULT_CLOCKIN_MAKEUP_RATE_LIMIT_RETRIES = 3
+DEFAULT_CLOCKIN_MAKEUP_RATE_LIMIT_RETRY_SECONDS = 10.0
+MAX_CLOCKIN_MAKEUP_RATE_LIMIT_RETRY_SECONDS = 120.0
+
+
+def _clockin_makeup_batch_delay_seconds() -> float:
+    raw = os.getenv("CLOCKIN_MAKEUP_BATCH_DELAY_SECONDS", str(DEFAULT_CLOCKIN_MAKEUP_BATCH_DELAY_SECONDS))
+    try:
+        value = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return DEFAULT_CLOCKIN_MAKEUP_BATCH_DELAY_SECONDS
+    if value < 0:
+        return 0.0
+    return min(value, MAX_CLOCKIN_MAKEUP_BATCH_DELAY_SECONDS)
+
+
+def _clockin_makeup_rate_limit_retries() -> int:
+    raw = os.getenv("CLOCKIN_MAKEUP_RATE_LIMIT_RETRIES", str(DEFAULT_CLOCKIN_MAKEUP_RATE_LIMIT_RETRIES))
+    try:
+        value = int(float(str(raw).strip()))
+    except (TypeError, ValueError):
+        return DEFAULT_CLOCKIN_MAKEUP_RATE_LIMIT_RETRIES
+    return max(value, 0)
+
+
+def _clockin_makeup_rate_limit_retry_seconds() -> float:
+    raw = os.getenv("CLOCKIN_MAKEUP_RATE_LIMIT_RETRY_SECONDS", str(DEFAULT_CLOCKIN_MAKEUP_RATE_LIMIT_RETRY_SECONDS))
+    try:
+        value = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return DEFAULT_CLOCKIN_MAKEUP_RATE_LIMIT_RETRY_SECONDS
+    if value < 0:
+        return 0.0
+    return min(value, MAX_CLOCKIN_MAKEUP_RATE_LIMIT_RETRY_SECONDS)
+
+
+def _is_clockin_rate_limited(result: Dict[str, Any]) -> bool:
+    if not isinstance(result, dict) or result.get("status") != "fail":
+        return False
+    text = f"{result.get('message') or ''} {json.dumps(result.get('details') or {}, ensure_ascii=False)}"
+    patterns = ("请求过于频繁", "操作过于频繁", "IP请求过于频繁", "429", "too many requests", "rate limit")
+    lower = text.lower()
+    return any(item.lower() in lower for item in patterns)
+
+
+def _with_makeup_retry_details(result: Dict[str, Any], retries: int, retry_wait_seconds: float) -> Dict[str, Any]:
+    if retries <= 0:
+        return result
+    details = result.get("details")
+    if not isinstance(details, dict):
+        details = {}
+    result["details"] = {
+        **details,
+        "频繁重试次数": retries,
+        "频繁重试等待秒": retry_wait_seconds,
+    }
+    return result
+
+
+def _perform_clock_in_makeup_with_rate_limit_retry(
+    api_client: ApiClient,
+    config: ConfigManager,
+    target_date: str,
+    target_type: Optional[str],
+    retry_count: int,
+    retry_seconds: float,
+) -> tuple[Dict[str, Any], int]:
+    retries_used = 0
+    while True:
+        result = perform_clock_in_makeup(api_client, config, target_date, target_type=target_type)
+        if not _is_clockin_rate_limited(result) or retries_used >= retry_count:
+            return _with_makeup_retry_details(result, retries_used, retry_seconds), retries_used
+        wait_seconds = min(retry_seconds * (2 ** retries_used), MAX_CLOCKIN_MAKEUP_RATE_LIMIT_RETRY_SECONDS)
+        logger.warning("补卡触发频繁请求限制，等待 %.1f 秒后重试 %s", wait_seconds, target_date)
+        time.sleep(wait_seconds)
+        retries_used += 1
 
 
 def _month_bounds(dt: datetime) -> tuple[datetime, datetime]:
@@ -113,7 +193,7 @@ def perform_clock_in(
         should_skip = False
         skip_message = ""
 
-        if clock_in_mode == "holiday" and is_holiday(current_time):
+        if not replace and clock_in_mode == "holiday" and is_holiday(current_time):
             if not special_clock_in:
                 should_skip = True
                 skip_message = "今天是休息日，已跳过打卡"
@@ -121,7 +201,7 @@ def perform_clock_in(
                 checkin_type = "HOLIDAY"
                 display_type = "休息/节假日"
 
-        elif clock_in_mode == "custom":
+        elif not replace and clock_in_mode == "custom":
             today_weekday = current_time.weekday() + 1
             custom_days = config.get_value("config.clockIn.customDays") or []
             if today_weekday not in custom_days:
@@ -323,12 +403,32 @@ def perform_clock_in_makeup_many(
     config: ConfigManager,
     target_dates: Optional[List[Any]],
     target_type: Optional[str] = None,
+    delay_seconds: Optional[float] = None,
+    rate_limit_retries: Optional[int] = None,
+    rate_limit_retry_seconds: Optional[float] = None,
 ) -> Dict[str, Any]:
     dates = _normalize_makeup_dates(target_dates)
     if not dates:
         return {"status": "fail", "message": "请选择有效的补卡日期", "task_type": "补卡"}
 
-    results = [perform_clock_in_makeup(api_client, config, item, target_type=target_type) for item in dates]
+    delay = _clockin_makeup_batch_delay_seconds() if delay_seconds is None else max(float(delay_seconds), 0.0)
+    retry_count = _clockin_makeup_rate_limit_retries() if rate_limit_retries is None else max(int(rate_limit_retries), 0)
+    retry_seconds = _clockin_makeup_rate_limit_retry_seconds() if rate_limit_retry_seconds is None else max(float(rate_limit_retry_seconds), 0.0)
+    results = []
+    rate_limit_retry_total = 0
+    for index, item in enumerate(dates):
+        if index > 0 and delay > 0:
+            time.sleep(delay)
+        result, retries_used = _perform_clock_in_makeup_with_rate_limit_retry(
+            api_client,
+            config,
+            item,
+            target_type=target_type,
+            retry_count=retry_count,
+            retry_seconds=retry_seconds,
+        )
+        rate_limit_retry_total += retries_used
+        results.append(result)
     failed = [item for item in results if item.get("status") == "fail"]
     succeeded = [item for item in results if item.get("status") == "success"]
     skipped = [item for item in results if item.get("status") == "skip"]
@@ -350,6 +450,10 @@ def perform_clock_in_makeup_many(
             "成功": len(succeeded),
             "失败": len(failed),
             "跳过": len(skipped),
+            "请求间隔秒": delay,
+            "频繁重试次数": rate_limit_retry_total,
+            "频繁重试最大次数": retry_count,
+            "频繁重试初始等待秒": retry_seconds,
         },
         "items": results,
     }
@@ -375,7 +479,7 @@ def _submit_report_common(
     config_key_map = {"day": "daily", "week": "weekly", "month": "monthly"}
     config_key = config_key_map.get(report_type)
 
-    if not config.get_value(f"config.reportSettings.{config_key}.enabled"):
+    if not force_report and not config.get_value(f"config.reportSettings.{config_key}.enabled"):
         logger.info(f"用户未开启{task_name}功能，跳过")
         now = datetime.now()
         return {

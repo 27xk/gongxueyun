@@ -138,6 +138,7 @@ def build_missing_clockin_day_options(
     end_date: Any,
     *,
     scheduled_weekdays: Sequence[Any] | None = None,
+    respect_scheduled_weekdays: bool = True,
     required_types: Sequence[str] = DEFAULT_REQUIRED_TYPES,
 ) -> List[Dict[str, Any]]:
     start = _coerce_date(start_date)
@@ -145,7 +146,7 @@ def build_missing_clockin_day_options(
     if start > end:
         start = end
 
-    weekdays = _scheduled_weekdays(scheduled_weekdays)
+    weekdays = _scheduled_weekdays(scheduled_weekdays) if respect_scheduled_weekdays else None
     required = [str(item or "").strip().upper() for item in required_types if str(item or "").strip()]
     by_date: Dict[str, set[str]] = {}
     for item in normalize_clockin_records(records):
