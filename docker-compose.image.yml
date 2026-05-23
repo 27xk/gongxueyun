@@ -2,30 +2,72 @@ name: automoguding-saas
 
 services:
   app:
-    image: ${APP_IMAGE:?Set APP_IMAGE in .env, for example ghcr.io/owner/repo:20260522}
+    # 可选：指定镜像标签。默认使用 GitHub Actions 发布的 latest。
+    # 示例：APP_IMAGE=ghcr.io/27xk/gongxueyun:20260524-153045
+    image: ${APP_IMAGE:-ghcr.io/27xk/gongxueyun:latest}
     pull_policy: always
     ports:
+      # 可选：宿主机端口，默认 8147。
+      # 示例：APP_PORT=18080
       - "${APP_PORT:-8147}:8147"
     volumes:
       - ./data/images:/app/server/images
     environment:
-      TZ: ${TZ:-Asia/Shanghai}
-      SCHEDULER_TIMEZONE: ${SCHEDULER_TIMEZONE:-Asia/Shanghai}
-      SCHEDULER_JITTER_SECONDS: ${SCHEDULER_JITTER_SECONDS:-600}
-      SCHEDULER_REPORT_JITTER_SECONDS: ${SCHEDULER_REPORT_JITTER_SECONDS:-0}
-      CLOCKIN_MAKEUP_BATCH_DELAY_SECONDS: ${CLOCKIN_MAKEUP_BATCH_DELAY_SECONDS:-2}
-      CLOCKIN_MAKEUP_RATE_LIMIT_RETRIES: ${CLOCKIN_MAKEUP_RATE_LIMIT_RETRIES:-3}
-      CLOCKIN_MAKEUP_RATE_LIMIT_RETRY_SECONDS: ${CLOCKIN_MAKEUP_RATE_LIMIT_RETRY_SECONDS:-10}
-      CLOCKIN_MAKEUP_RATE_LIMIT_COOLDOWN_SECONDS: ${CLOCKIN_MAKEUP_RATE_LIMIT_COOLDOWN_SECONDS:-60}
-      MOGUDING_PROXY_API_URL: ${MOGUDING_PROXY_API_URL:-}
-      MOGUDING_PROXY_TTL_SECONDS: ${MOGUDING_PROXY_TTL_SECONDS:-55}
-      MOGUDING_PROXY_API_TIMEOUT_SECONDS: ${MOGUDING_PROXY_API_TIMEOUT_SECONDS:-10}
-      MOGUDING_PROXY_URLS: ${MOGUDING_PROXY_URLS:-}
-      REPORT_MAKEUP_BATCH_DELAY_SECONDS: ${REPORT_MAKEUP_BATCH_DELAY_SECONDS:-2}
-      GEOCODE_PROVIDER: ${GEOCODE_PROVIDER:-osm}
-      AMAP_KEY: ${AMAP_KEY:-}
-      APP_SECRET: ${APP_SECRET:-please-change-me-in-production}
-      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123456}
+      # 必填：MySQL 连接串，只支持 mysql+pymysql://。
+      # 示例：DATABASE_URL=mysql+pymysql://user:password@mysql-host:3306/automoguding?charset=utf8mb4
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
+
+      # 可选：容器时区，默认镜像内已设置为 Asia/Shanghai。
+      # TZ: ${TZ:-Asia/Shanghai}
+
+      # 可选：定时任务时区，默认 Asia/Shanghai。
+      # SCHEDULER_TIMEZONE: ${SCHEDULER_TIMEZONE:-Asia/Shanghai}
+
+      # 可选：打卡定时任务随机抖动秒数，默认 600，避免所有账号同一秒请求。
+      # SCHEDULER_JITTER_SECONDS: ${SCHEDULER_JITTER_SECONDS:-600}
+
+      # 可选：报告定时任务随机抖动秒数，默认 0。
+      # SCHEDULER_REPORT_JITTER_SECONDS: ${SCHEDULER_REPORT_JITTER_SECONDS:-0}
+
+      # 可选：一键补卡每个日期之间的基础间隔秒数，默认 2。
+      # CLOCKIN_MAKEUP_BATCH_DELAY_SECONDS: ${CLOCKIN_MAKEUP_BATCH_DELAY_SECONDS:-2}
+
+      # 可选：补卡遇到请求过于频繁时的最大重试次数，默认 3。
+      # CLOCKIN_MAKEUP_RATE_LIMIT_RETRIES: ${CLOCKIN_MAKEUP_RATE_LIMIT_RETRIES:-3}
+
+      # 可选：补卡频繁请求重试的初始等待秒数，默认 10，后续会递增退避。
+      # CLOCKIN_MAKEUP_RATE_LIMIT_RETRY_SECONDS: ${CLOCKIN_MAKEUP_RATE_LIMIT_RETRY_SECONDS:-10}
+
+      # 可选：补卡触发 IP 频繁后，后续日期之间的冷却间隔秒数，默认 60。
+      # CLOCKIN_MAKEUP_RATE_LIMIT_COOLDOWN_SECONDS: ${CLOCKIN_MAKEUP_RATE_LIMIT_COOLDOWN_SECONDS:-60}
+
+      # 可选：手动补卡专用动态代理获取接口。未开启或未配置时走正常网络。
+      # MOGUDING_PROXY_API_URL: ${MOGUDING_PROXY_API_URL:-}
+
+      # 可选：动态代理缓存秒数，默认 55。
+      # MOGUDING_PROXY_TTL_SECONDS: ${MOGUDING_PROXY_TTL_SECONDS:-55}
+
+      # 可选：动态代理接口请求超时秒数，默认 10。
+      # MOGUDING_PROXY_API_TIMEOUT_SECONDS: ${MOGUDING_PROXY_API_TIMEOUT_SECONDS:-10}
+
+      # 可选：手动补卡专用静态代理池，多个代理用逗号、分号或换行分隔。
+      # MOGUDING_PROXY_URLS: ${MOGUDING_PROXY_URLS:-}
+
+      # 可选：日报 / 周报 / 月报一键补交的周期间隔秒数，默认 2。
+      # REPORT_MAKEUP_BATCH_DELAY_SECONDS: ${REPORT_MAKEUP_BATCH_DELAY_SECONDS:-2}
+
+      # 可选：地理编码服务，默认 osm；如果使用高德，设置为 amap 并配置 AMAP_KEY。
+      # GEOCODE_PROVIDER: ${GEOCODE_PROVIDER:-osm}
+
+      # 可选：高德地图 Key，仅 GEOCODE_PROVIDER=amap 时需要。
+      # AMAP_KEY: ${AMAP_KEY:-}
+
+      # 可选但生产推荐：应用签名密钥。不设置时会随机生成，重启后登录态会失效。
+      # APP_SECRET: ${APP_SECRET:-please-change-me-in-production}
+
+      # 可选：初始化管理员账号，默认 admin。
+      # ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+
+      # 可选：初始化管理员密码，默认 admin123456。生产建议修改。
+      # ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123456}
     restart: unless-stopped

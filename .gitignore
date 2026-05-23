@@ -46,9 +46,10 @@ gxyzj.py
 *.p12
 *.pfx
 
-# Downloaded models
-server/models_onnx/
+# ONNX models
 *.onnx
+!server/models_onnx/
+!server/models_onnx/*.onnx
 
 # Local tools and editors
 .superpowers/

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlmodel import Session, select
 from sqlalchemy import func
 from server.database import get_session, engine
+from server.batch_jobs import get_batch_job_item_status_counts
 from server.models import User, UserCreate, UserRead, UserUpdate, UserListRead, AuditLog, BatchJob, BatchJobItem, AdminUser, AppUser, SystemSetting
 from server.scheduler import add_user_job, remove_user_job, user_to_config
 from server.task_runner import perform_clock_in_makeup, perform_clock_in_makeup_many, run_task_by_config
@@ -2227,14 +2228,9 @@ def read_batch_job(*, session: Session = Depends(get_session), job_id: int = 0, 
     job = session.get(BatchJob, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    running = session.exec(
-        select(func.count()).select_from(BatchJobItem).where((BatchJobItem.job_id == job_id) & (BatchJobItem.status == "running"))
-    ).one()
-    queued = session.exec(
-        select(func.count()).select_from(BatchJobItem).where((BatchJobItem.job_id == job_id) & (BatchJobItem.status == "queued"))
-    ).one()
+    status_counts = get_batch_job_item_status_counts(session, job_id, ["running", "queued"])
     last_errors = session.exec(
-        select(BatchJobItem)
+        select(BatchJobItem.user_id, BatchJobItem.error, BatchJobItem.finished_at)
         .where((BatchJobItem.job_id == job_id) & (BatchJobItem.status == "fail"))
         .order_by(BatchJobItem.id.desc())
         .limit(20)
@@ -2249,11 +2245,11 @@ def read_batch_job(*, session: Session = Depends(get_session), job_id: int = 0, 
         "success": job.success,
         "fail": job.fail,
         "concurrency": job.concurrency,
-        "running": int(running or 0),
-        "queued": int(queued or 0),
+        "running": int(status_counts.get("running", 0)),
+        "queued": int(status_counts.get("queued", 0)),
         "last_errors": [
-            {"user_id": it.user_id, "message": it.error or "Fail", "ts": (it.finished_at.isoformat() if it.finished_at else None)}
-            for it in last_errors
+            {"user_id": row.user_id, "message": row.error or "Fail", "ts": (row.finished_at.isoformat() if row.finished_at else None)}
+            for row in last_errors
         ],
     }
 

@@ -49,9 +49,38 @@ def ensure_user_runtime_columns(db_engine) -> None:
             conn.execute(text(f"ALTER TABLE `user` ADD COLUMN `{column_name}` JSON NULL"))
 
 
+def ensure_runtime_indexes(db_engine) -> None:
+    inspector = inspect(db_engine)
+    table_names = set(inspector.get_table_names())
+    index_specs = {
+        "batchjob": {
+            "ix_batchjob_status_id": ["status", "id"],
+        },
+        "batchjobitem": {
+            "ix_batchjobitem_job_status_id": ["job_id", "status", "id"],
+            "ix_batchjobitem_job_status_next_run_id": ["job_id", "status", "next_run_at", "id"],
+        },
+    }
+
+    with db_engine.begin() as conn:
+        for table_name, specs in index_specs.items():
+            if table_name not in table_names:
+                continue
+            existing_indexes = {
+                str(item.get("name") or "").lower()
+                for item in inspector.get_indexes(table_name)
+            }
+            for index_name, columns in specs.items():
+                if index_name.lower() in existing_indexes:
+                    continue
+                columns_sql = ", ".join(f"`{column}`" for column in columns)
+                conn.execute(text(f"CREATE INDEX `{index_name}` ON `{table_name}` ({columns_sql})"))
+
+
 def create_db_and_tables():
     SQLModel.metadata.create_all(engine)
     ensure_user_runtime_columns(engine)
+    ensure_runtime_indexes(engine)
 
 
 def get_session():

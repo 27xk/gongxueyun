@@ -16,6 +16,8 @@ import threading
 logger = logging.getLogger(__name__)
 
 MODEL_DIR = os.getenv("MODEL_DIR", os.path.join(os.path.dirname(os.path.dirname(__file__)), "models_onnx"))
+DEFAULT_MODEL_BASE_URL = "https://raw.githubusercontent.com/27xk/gongxueyun/main/server/models_onnx"
+MODEL_BASE_URL = (os.getenv("MODEL_BASE_URL") or DEFAULT_MODEL_BASE_URL).rstrip("/")
 
 def get_model_path(filename: str) -> str:
     return os.path.join(MODEL_DIR, filename)
@@ -41,8 +43,8 @@ def ensure_model_exists(filename: str, url: str):
         raise
 
 MODEL_URLS = {
-    "ocr.onnx": "https://github.com/maserpoassr/automoguding-saas/releases/download/v0.0.1/ocr.onnx",
-    "yolov5n.onnx": "https://github.com/maserpoassr/automoguding-saas/releases/download/v0.0.1/yolov5n.onnx",
+    "ocr.onnx": f"{MODEL_BASE_URL}/ocr.onnx",
+    "yolov5n.onnx": f"{MODEL_BASE_URL}/yolov5n.onnx",
 }
 
 _ORT_SESSION_CACHE = {}

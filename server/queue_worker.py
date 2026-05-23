@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from sqlmodel import Session, select
 from sqlalchemy import update, case, func
 
+from server.batch_jobs import count_batch_job_items_by_status
 from server.database import engine
 from server.models import BatchJob, BatchJobItem, User, AuditLog
 from server.scheduler import user_to_config
@@ -130,10 +131,7 @@ def _claim_items() -> None:
                 session.commit()
                 continue
 
-            running = session.exec(
-                select(BatchJobItem).where((BatchJobItem.job_id == job.id) & (BatchJobItem.status == "running"))
-            ).all()
-            running_count = len(running)
+            running_count = count_batch_job_items_by_status(session, job.id, "running")
             capacity = max(0, int(job.concurrency or 1) - running_count)
             if capacity <= 0:
                 if job.status != "running":

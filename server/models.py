@@ -1,5 +1,6 @@
 from typing import Optional, List, Dict, Any
 from sqlmodel import Field, SQLModel, JSON, Column
+from sqlalchemy import Index
 from pydantic import BaseModel
 import datetime
 
@@ -68,6 +69,10 @@ class AuditLog(SQLModel, table=True):
     detail: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
 
 class BatchJob(SQLModel, table=True):
+    __table_args__ = (
+        Index("ix_batchjob_status_id", "status", "id"),
+    )
+
     id: Optional[int] = Field(default=None, primary_key=True)
     created_at: datetime.datetime = Field(default_factory=datetime.datetime.utcnow, index=True)
     created_by: str = Field(index=True)
@@ -85,6 +90,11 @@ class BatchJob(SQLModel, table=True):
     paused: bool = Field(default=False, index=True)
 
 class BatchJobItem(SQLModel, table=True):
+    __table_args__ = (
+        Index("ix_batchjobitem_job_status_id", "job_id", "status", "id"),
+        Index("ix_batchjobitem_job_status_next_run_id", "job_id", "status", "next_run_at", "id"),
+    )
+
     id: Optional[int] = Field(default=None, primary_key=True)
     job_id: int = Field(index=True)
     user_id: int = Field(index=True)
