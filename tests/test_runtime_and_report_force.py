@@ -45,6 +45,143 @@ class RuntimeAndManualReportTest(unittest.TestCase):
 
         self.assertNotEqual(result["status"], "skip")
 
+    def test_force_weekly_report_ignores_same_weeks_label_when_period_differs(self):
+        config = Mock()
+        config.get_value.side_effect = lambda key: {
+            "config.reportSettings.weekly.enabled": True,
+            "planInfo.planPaper.weekPaperNum": 1,
+            "config.reportSettings.weekly.imageCount": 0,
+            "userInfo.orgJson.snowFlakeId": "org-1",
+            "userInfo.userId": "user-1",
+        }.get(key)
+        api_client = Mock()
+        api_client.get_submitted_reports_info.return_value = {
+            "flag": 2,
+            "data": [
+                {
+                    "weeks": "\u7b2c3\u5468",
+                    "startTime": "2026-05-18 00:00:00",
+                    "endTime": "2026-05-24 23:59:59",
+                }
+            ],
+        }
+        api_client.get_job_info.return_value = {"jobId": "job-1"}
+        api_client.get_upload_token.return_value = "upload-token"
+        api_client.get_from_info.return_value = []
+
+        with (
+            patch("server.task_runner.generate_article", return_value="weekly content"),
+            patch("server.task_runner.upload_img", return_value=""),
+        ):
+            result = _submit_report_common(
+                api_client=api_client,
+                config=config,
+                report_type="week",
+                title_func=lambda count: f"week-{count}",
+                check_time_func=lambda _: False,
+                get_submitted_func=lambda: api_client.get_submitted_reports_info("week"),
+                paper_num_key="planInfo.planPaper.weekPaperNum",
+                image_count_key="config.reportSettings.weekly.imageCount",
+                task_name="weekly report",
+                form_type=8,
+                force_report=True,
+                target_period="2026-05-04",
+            )
+
+        self.assertEqual(result["status"], "success")
+        api_client.submit_report.assert_called_once()
+        submitted = api_client.submit_report.call_args.args[0]
+        self.assertEqual(submitted["startTime"], "2026-05-04 00:00:00")
+        self.assertEqual(submitted["endTime"], "2026-05-10 23:59:59")
+
+    def test_force_daily_report_detects_same_day_from_date_only_report_time(self):
+        config = Mock()
+        config.get_value.side_effect = lambda key: {
+            "config.reportSettings.daily.enabled": True,
+            "planInfo.planPaper.dayPaperNum": 1,
+            "config.reportSettings.daily.imageCount": 0,
+            "userInfo.orgJson.snowFlakeId": "org-1",
+            "userInfo.userId": "user-1",
+        }.get(key)
+        api_client = Mock()
+        api_client.get_submitted_reports_info.return_value = {
+            "flag": 1,
+            "data": [
+                {
+                    "reportTime": "2026-05-22",
+                }
+            ],
+        }
+        api_client.get_job_info.return_value = {"jobId": "job-1"}
+        api_client.get_upload_token.return_value = "upload-token"
+        api_client.get_from_info.return_value = []
+
+        with (
+            patch("server.task_runner.generate_article", return_value="daily content"),
+            patch("server.task_runner.upload_img", return_value=""),
+        ):
+            result = _submit_report_common(
+                api_client=api_client,
+                config=config,
+                report_type="day",
+                title_func=lambda count: f"day-{count}",
+                check_time_func=lambda _: False,
+                get_submitted_func=lambda: api_client.get_submitted_reports_info("day"),
+                paper_num_key="planInfo.planPaper.dayPaperNum",
+                image_count_key="config.reportSettings.daily.imageCount",
+                task_name="daily report",
+                form_type=7,
+                force_report=True,
+                target_period="2026-05-22",
+            )
+
+        self.assertEqual(result["status"], "skip")
+        api_client.submit_report.assert_not_called()
+
+    def test_force_monthly_report_detects_same_month_from_report_time_when_yearmonth_missing(self):
+        config = Mock()
+        config.get_value.side_effect = lambda key: {
+            "config.reportSettings.monthly.enabled": True,
+            "planInfo.planPaper.monthPaperNum": 1,
+            "config.reportSettings.monthly.imageCount": 0,
+            "userInfo.orgJson.snowFlakeId": "org-1",
+            "userInfo.userId": "user-1",
+        }.get(key)
+        api_client = Mock()
+        api_client.get_submitted_reports_info.return_value = {
+            "flag": 1,
+            "data": [
+                {
+                    "reportTime": "2026-05-20 12:00:00",
+                }
+            ],
+        }
+        api_client.get_job_info.return_value = {"jobId": "job-1"}
+        api_client.get_upload_token.return_value = "upload-token"
+        api_client.get_from_info.return_value = []
+
+        with (
+            patch("server.task_runner.generate_article", return_value="monthly content"),
+            patch("server.task_runner.upload_img", return_value=""),
+        ):
+            result = _submit_report_common(
+                api_client=api_client,
+                config=config,
+                report_type="month",
+                title_func=lambda count: f"month-{count}",
+                check_time_func=lambda _: False,
+                get_submitted_func=lambda: api_client.get_submitted_reports_info("month"),
+                paper_num_key="planInfo.planPaper.monthPaperNum",
+                image_count_key="config.reportSettings.monthly.imageCount",
+                task_name="monthly report",
+                form_type=9,
+                force_report=True,
+                target_period="2026-05",
+            )
+
+        self.assertEqual(result["status"], "skip")
+        api_client.submit_report.assert_not_called()
+
     def test_missing_clockin_can_ignore_scheduled_weekdays_for_manual_makeup(self):
         options = build_missing_clockin_day_options(
             records=[],

@@ -252,9 +252,9 @@ AMAP_KEY=your-amap-key
 - `DATABASE_URL` 必填，且必须以 `mysql+pymysql://` 开头。
 - 生产环境应显式配置 `APP_SECRET`。
 - 默认使用 `mapchaxun` 内部接口做地址搜索，无需地图 Key。接口返回经纬度和省市区后，前端会自动回填打卡位置。
-- `GEOCODE_SEARCH_PROVIDER` 只控制搜索框，默认 `mapchaxun`；`GEOCODE_PROVIDER` 控制地图点击后的逆地理解析，默认 `osm`，也可切换 `baidu` / `amap`。
+- `GEOCODE_SEARCH_PROVIDER` 只控制搜索框，默认 `mapchaxun`；`GEOCODE_PROVIDER` 控制搜索结果需要反查时的逆地理解析，默认 `osm`，也可切换 `baidu` / `amap`。
 - 如果逆地理解析或搜索切换到百度 Web 服务，请提供 `BAIDU_MAP_AK`；缺少 AK 时会返回明确错误。`BAIDU_MAP_COORD_TYPE` 默认 `gcj02ll`，也可用 `BAIDU_MAP_INPUT_COORD_TYPE`、`BAIDU_MAP_OUTPUT_COORD_TYPE` 分别控制百度逆地理输入坐标和返回坐标。
-- 管理端打卡设置使用内置 Leaflet 地图，可在地图上搜索或点击来自动回填经纬度和地址。
+- 管理端打卡设置默认内嵌 `https://www.mapchaxun.cn/jingweidu` 作为经纬度核对页；搜索地址仍会通过后端自动回填经纬度、省市区和地址。如需自定义核对页，需要在前端构建前设置 `VITE_MAP_DISPLAY_URL`。
 - `CLOCKIN_MAKEUP_BATCH_DELAY_SECONDS` 控制一键补卡的默认间隔。
 - `CLOCKIN_MAKEUP_RATE_LIMIT_RETRIES` 和 `CLOCKIN_MAKEUP_RATE_LIMIT_RETRY_SECONDS` 控制遇到频繁请求时的重试次数与初始等待时间。
 - `CLOCKIN_MAKEUP_RATE_LIMIT_COOLDOWN_SECONDS` 控制触发 IP 频繁后的批量冷却间隔。当前日期重试成功后，后续日期会按该间隔降速；如果当前日期重试耗尽仍然频繁，会停止剩余日期，避免继续触发远端风控。

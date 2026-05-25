@@ -68,7 +68,7 @@ AMAP_KEY=your-amap-key
 - `DATABASE_URL` 必须使用 MySQL，且必须以 `mysql+pymysql://` 开头。
 - 生产环境必须显式配置 `APP_SECRET`。
 - `GEOCODE_SEARCH_PROVIDER=mapchaxun` 为默认地址搜索服务，无需地图 Key，只影响搜索框。
-- `GEOCODE_PROVIDER` 控制地图点击后的逆地理解析，默认 `osm`，可切换 `baidu` / `amap`。
+- `GEOCODE_PROVIDER` 控制搜索结果需要反查时的逆地理解析，默认 `osm`，可切换 `baidu` / `amap`。
 - 使用百度 Web 服务时需要提供 `BAIDU_MAP_AK`；缺少 AK 时会返回明确错误。`BAIDU_MAP_COORD_TYPE` 默认 `gcj02ll`，也可用 `BAIDU_MAP_INPUT_COORD_TYPE`、`BAIDU_MAP_OUTPUT_COORD_TYPE` 分别控制百度逆地理输入坐标和返回坐标。
 - `CLOCKIN_MAKEUP_BATCH_DELAY_SECONDS` 控制一键补卡每个日期之间的默认间隔。
 - `CLOCKIN_MAKEUP_RATE_LIMIT_RETRIES` 控制补卡遇到频繁请求时的最大重试次数。

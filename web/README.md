@@ -10,7 +10,7 @@
 - Vue Router
 - Element Plus
 - Axios
-- Leaflet
+- 外部经纬度查询页
 
 ## 页面入口
 
@@ -47,7 +47,7 @@ npm run preview
 - `npm run dev` 默认监听 `0.0.0.0:5173`，并开启 strict port。
 - Vite 会把 `/api` 代理到 `http://127.0.0.1:8147`。
 - 当前没有前端测试脚本，也没有 `npm run lint`。
-- 管理端用户编辑页使用内置 Leaflet 地图，支持地图点击和地址搜索自动回填经纬度、省市区和地址。地址搜索走后端 `/geocode/search`。
+- 管理端用户编辑页默认内嵌 `https://www.mapchaxun.cn/jingweidu` 作为经纬度核对页；本地构建前可通过 `VITE_MAP_DISPLAY_URL` 覆盖。地址搜索走后端 `/geocode/search`，仍会自动回填经纬度、省市区和地址。
 
 ## 目录结构
 

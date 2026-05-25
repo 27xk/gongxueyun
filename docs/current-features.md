@@ -23,7 +23,7 @@ AutoMoGuDing SaaS 当前包含两套 Web 界面：
 
 ## 地图与地理编码
 
-管理端用户编辑页的打卡设置使用内置 Leaflet 地图。页面内的地址搜索走后端 `/geocode/search`，默认调用 `https://www.mapchaxun.cn/api/getSolidAdress`，会根据响应中的 `location` 和 `address_components` 自动回填经纬度、省市区和地址；地图点击仍走逆地理解析。
+管理端用户编辑页的打卡设置默认显示 `https://www.mapchaxun.cn/jingweidu`，用于人工核对经纬度。页面内的地址搜索仍走后端 `/geocode/search`，默认调用 `https://www.mapchaxun.cn/api/getSolidAdress`，会根据响应中的 `location` 和 `address_components` 自动回填经纬度、省市区和地址；如果搜索服务没有返回结构化地址，前端会继续调用 `/geocode/reverse` 反查地址。
 
 后端地址搜索默认配置：
 

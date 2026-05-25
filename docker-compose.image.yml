@@ -59,10 +59,10 @@ services:
       # 可选：日报 / 周报 / 月报一键补交的周期间隔秒数，默认 2。
       # REPORT_MAKEUP_BATCH_DELAY_SECONDS: ${REPORT_MAKEUP_BATCH_DELAY_SECONDS:-2}
 
-      # 可选：地址搜索服务，默认 mapchaxun；只影响搜索框，不影响地图点击逆地理解析。
+      # 可选：地址搜索服务，默认 mapchaxun；只影响搜索框。
       # GEOCODE_SEARCH_PROVIDER: ${GEOCODE_SEARCH_PROVIDER:-mapchaxun}
 
-      # 可选：地图点击后的逆地理解析服务，默认 osm；也可切换 baidu / amap。
+      # 可选：搜索结果需要反查时的逆地理解析服务，默认 osm；也可切换 baidu / amap。
       # GEOCODE_PROVIDER: ${GEOCODE_PROVIDER:-osm}
 
       # 可选：百度地图 Web 服务 AK，仅 GEOCODE_PROVIDER=baidu 或 GEOCODE_SEARCH_PROVIDER=baidu 时需要。

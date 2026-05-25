@@ -229,17 +229,26 @@ def _week_bounds(dt: datetime) -> tuple[str, str]:
 def _same_report_period(report: Dict[str, Any], report_type: str, current_time: datetime, weeks_label: str) -> bool:
     try:
         if report_type == "day":
-            ts = report.get("createTime") or report.get("reportTime")
-            if isinstance(ts, str):
-                return datetime.strptime(ts[:19], "%Y-%m-%d %H:%M:%S").date() == current_time.date()
+            ts = str(report.get("createTime") or report.get("reportTime") or "")[:10]
+            return ts == current_time.strftime("%Y-%m-%d")
         if report_type == "week":
             start, end = _week_bounds(current_time)
-            return (
-                report.get("weeks") == weeks_label
-                or (str(report.get("startTime") or "")[:10] == start[:10] and str(report.get("endTime") or "")[:10] == end[:10])
-            )
+            report_start = str(report.get("startTime") or "")[:10]
+            report_end = str(report.get("endTime") or "")[:10]
+            if report_start or report_end:
+                return report_start == start[:10] and report_end == end[:10]
+            ts = str(report.get("reportTime") or "")[:10]
+            if ts:
+                report_time = datetime.strptime(ts, "%Y-%m-%d")
+                report_week_start = report_time - timedelta(days=report_time.weekday())
+                return report_week_start.strftime("%Y-%m-%d") == start[:10]
+            return False
         if report_type == "month":
-            return str(report.get("yearmonth") or "")[:7] == current_time.strftime("%Y-%m")
+            target_month = current_time.strftime("%Y-%m")
+            yearmonth = str(report.get("yearmonth") or "")[:7]
+            if yearmonth:
+                return yearmonth == target_month
+            return str(report.get("reportTime") or "")[:7] == target_month
     except Exception:
         return False
     return False
