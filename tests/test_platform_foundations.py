@@ -368,6 +368,55 @@ class PlatformFoundationsTest(unittest.TestCase):
         self.assertNotIn("aquasecurity/setup-trivy@v0.2.1", workflow)
         self.assertNotIn("aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2", workflow)
 
+    def test_backend_requirements_do_not_pin_vulnerable_python_multipart(self):
+        requirements = (ROOT / "server" / "requirements.txt").read_text(encoding="utf-8").splitlines()
+        version = None
+        for line in requirements:
+            if line.startswith("python-multipart=="):
+                version = tuple(int(part) for part in line.split("==", 1)[1].split("."))
+                break
+
+        self.assertIsNotNone(version)
+        self.assertGreaterEqual(version, (0, 0, 29))
+        self.assertNotIn("python-multipart==0.0.9", "\n".join(requirements))
+
+    def test_frontend_lockfile_uses_non_vulnerable_vite(self):
+        package = json.loads((ROOT / "web" / "package.json").read_text(encoding="utf-8"))
+        lock = json.loads((ROOT / "web" / "package-lock.json").read_text(encoding="utf-8"))
+        vite_spec = package["devDependencies"]["vite"]
+        vite_lock = lock["packages"][""]["devDependencies"]["vite"]
+        vite_version = tuple(int(part) for part in lock["packages"]["node_modules/vite"]["version"].split("."))
+
+        self.assertEqual(vite_spec, "^7.3.2")
+        self.assertEqual(vite_lock, "^7.3.2")
+        self.assertGreaterEqual(vite_version, (7, 3, 2))
+        self.assertNotIn('"version": "7.3.1"', (ROOT / "web" / "package-lock.json").read_text(encoding="utf-8"))
+
+    def test_frontend_lockfile_uses_non_vulnerable_lodash(self):
+        package = json.loads((ROOT / "web" / "package.json").read_text(encoding="utf-8"))
+        lock = json.loads((ROOT / "web" / "package-lock.json").read_text(encoding="utf-8"))
+
+        for dependency in ("lodash", "lodash-es"):
+            override = package["overrides"][dependency]
+            locked_version = lock["packages"][f"node_modules/{dependency}"]["version"]
+            version = tuple(int(part) for part in locked_version.split("."))
+
+            self.assertEqual(override, "4.18.1")
+            self.assertGreaterEqual(version, (4, 18, 1))
+            self.assertNotEqual(locked_version, "4.17.23")
+
+    def test_frontend_lockfile_uses_non_vulnerable_axios(self):
+        package = json.loads((ROOT / "web" / "package.json").read_text(encoding="utf-8"))
+        lock = json.loads((ROOT / "web" / "package-lock.json").read_text(encoding="utf-8"))
+        axios_spec = package["dependencies"]["axios"]
+        axios_lock = lock["packages"][""]["dependencies"]["axios"]
+        axios_version = tuple(int(part) for part in lock["packages"]["node_modules/axios"]["version"].split("."))
+
+        self.assertEqual(axios_spec, "^1.15.2")
+        self.assertEqual(axios_lock, "^1.15.2")
+        self.assertGreaterEqual(axios_version, (1, 15, 2))
+        self.assertNotIn('"version": "1.13.2"', (ROOT / "web" / "package-lock.json").read_text(encoding="utf-8"))
+
     def test_ci_generates_signed_supply_chain_artifacts(self):
         workflow = (ROOT / ".github" / "workflows" / "docker-publish.yml").read_text(encoding="utf-8")
 

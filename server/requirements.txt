@@ -3,7 +3,7 @@ uvicorn[standard]==0.37.0
 sqlmodel==0.0.37
 apscheduler==3.10.4
 alembic==1.18.4
-python-multipart==0.0.9
+python-multipart==0.0.29
 pymysql==1.1.1
 python-dotenv==1.0.1
 aes-pkcs5==1.0.3
