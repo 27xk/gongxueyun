@@ -933,7 +933,7 @@ class ApiClient:
         sign_data = self._clock_in_sign_data(checkin_info, planId)
 
         if self.config.get_value("userInfo.userType") != "teacher":
-            url = "attendence/attendanceReplace/v4/save" if replace else "attendence/clock/v5/save"
+            url = "attendence/attendanceReplace/v6/save" if replace else "attendence/clock/v6/save"
 
         logger.info(f'打卡类型：{checkin_info.get("type")}')
         
@@ -943,10 +943,10 @@ class ApiClient:
             "country", "createBy", "createTime", "description", "device", "images", 
             "isDeleted", "isReplace", "modifiedBy", "modifiedTime", "schoolId", 
             "state", "teacherId", "teacherNumber", "type", "stuId", "planId", 
-            "attendanceType", "username", "attachments", "userId", "isSYN", 
+            "attendanceType", "username","isBeyondFenceStu", "attachments", "userId", "isSYN", 
             "studentId", "applyState", "studentNumber", "memberNumber", "headImg", 
             "attendenceTime", "depName", "majorName", "className", "logDtoList", 
-            "isBeyondFence", "practiceAddress", "tpJobId", "t"
+            "isBeyondFence", "practiceAddress", "tpJobId","jobAddress","jobAddrPoint","certifyId","outRegisterNo","t"
         ]
         data = dict.fromkeys(keys, None)
 
