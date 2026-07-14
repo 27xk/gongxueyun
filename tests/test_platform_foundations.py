@@ -510,10 +510,15 @@ class PlatformFoundationsTest(unittest.TestCase):
         vite_lock = lock["packages"][""]["devDependencies"]["vite"]
         vite_version = tuple(int(part) for part in lock["packages"]["node_modules/vite"]["version"].split("."))
 
-        self.assertEqual(vite_spec, "^7.3.2")
-        self.assertEqual(vite_lock, "^7.3.2")
-        self.assertGreaterEqual(vite_version, (7, 3, 2))
-        self.assertNotIn('"version": "7.3.1"', (ROOT / "web" / "package-lock.json").read_text(encoding="utf-8"))
+        self.assertEqual(vite_spec, "^7.3.4")
+        self.assertEqual(vite_lock, "^7.3.4")
+        self.assertGreaterEqual(vite_version, (7, 3, 4))
+
+    def test_frontend_lockfile_uses_non_vulnerable_form_data(self):
+        lock = json.loads((ROOT / "web" / "package-lock.json").read_text(encoding="utf-8"))
+        version = tuple(int(part) for part in lock["packages"]["node_modules/form-data"]["version"].split("."))
+
+        self.assertGreaterEqual(version, (4, 0, 6))
 
     def test_frontend_lockfile_uses_non_vulnerable_lodash(self):
         package = json.loads((ROOT / "web" / "package.json").read_text(encoding="utf-8"))
