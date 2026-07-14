@@ -482,7 +482,7 @@ class PlatformFoundationsTest(unittest.TestCase):
                 break
 
         self.assertIsNotNone(version)
-        self.assertGreaterEqual(version, (0, 0, 29))
+        self.assertGreaterEqual(version, (0, 0, 31))
         self.assertNotIn("python-multipart==0.0.9", "\n".join(requirements))
 
     def test_backend_requirements_pin_recent_audit_fixes(self):
@@ -495,11 +495,13 @@ class PlatformFoundationsTest(unittest.TestCase):
             versions[name] = tuple(int(part) for part in version.split("."))
 
         self.assertGreaterEqual(versions["fastapi"], (0, 136, 3))
-        self.assertGreaterEqual(versions["starlette"], (1, 0, 1))
+        self.assertGreaterEqual(versions["starlette"], (1, 3, 1))
         self.assertGreaterEqual(versions["httpx"], (0, 28, 1))
         self.assertGreaterEqual(versions["python-dotenv"], (1, 2, 2))
         self.assertGreaterEqual(versions["requests"], (2, 33, 0))
-        self.assertGreaterEqual(versions["pillow"], (12, 2, 0))
+        self.assertGreaterEqual(versions["python-multipart"], (0, 0, 31))
+        self.assertGreaterEqual(versions["pillow"], (12, 3, 0))
+        self.assertGreaterEqual(versions["cryptography"], (48, 0, 1))
 
     def test_frontend_lockfile_uses_non_vulnerable_vite(self):
         package = json.loads((ROOT / "web" / "package.json").read_text(encoding="utf-8"))
