@@ -294,6 +294,7 @@ def perform_clock_in(
     forced_checkin_type: Optional[str] = None,
     target_time: Optional[datetime] = None,
     replace: bool = False,
+    out_register_no: Optional[str] = None,
 ) -> Dict[str, Any]:
     """执行打卡操作"""
     try:
@@ -398,11 +399,33 @@ def perform_clock_in(
             "attendenceTime": current_time.strftime("%Y-%m-%d %H:%M:%S"),
             "isReplace": 1 if replace else None,
         }
+        if out_register_no:
+            checkin_info["outRegisterNo"] = out_register_no
 
         if replace:
-            api_client.submit_clock_in_replace(checkin_info)
+            submit_result = api_client.submit_clock_in_replace(checkin_info)
         else:
-            api_client.submit_clock_in(checkin_info)
+            submit_result = api_client.submit_clock_in(checkin_info)
+        if (
+            isinstance(submit_result, dict)
+            and submit_result.get("status") == "verification_required"
+        ):
+            details = {"target_type": checkin_type}
+            message = "补卡触发支付宝安全验证，本次补卡未完成"
+            if not replace:
+                details.update(
+                    {
+                        "outRegisterNo": submit_result.get("outRegisterNo"),
+                        "registerUrl": submit_result.get("registerUrl"),
+                    }
+                )
+                message = "需要完成支付宝安全验证，请验证后继续打卡"
+            return {
+                "status": "fail",
+                "message": message,
+                "task_type": "打卡",
+                "details": details,
+            }
         logger.info(f"用户 {user_name} {display_type} 打卡成功")
 
         return {

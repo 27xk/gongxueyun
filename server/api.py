@@ -5,7 +5,7 @@ from server.database import get_session, engine
 from server.batch_jobs import get_batch_job_item_status_counts
 from server.models import DEFAULT_TENANT_ID, User, UserCreate, UserRead, UserUpdate, UserListRead, AuditLog, BatchJob, BatchJobItem, AdminUser, AppUser, SystemSetting
 from server.scheduler import add_user_job, remove_user_job, user_to_config
-from server.task_runner import perform_clock_in_makeup, perform_clock_in_makeup_many, run_task_by_config
+from server.task_runner import perform_clock_in, perform_clock_in_makeup, perform_clock_in_makeup_many, run_task_by_config
 from server.clockin_backfill import build_missing_clockin_day_options, normalize_clockin_records, parse_clockin_date
 from server.util.Config import ConfigManager
 from server.coreApi.MainLogicApi import ApiClient
@@ -36,7 +36,7 @@ from server.rate_limit import check_rate_limit
 from server.security import env_flag, int_env, is_production, is_safe_outbound_url, require_password_strength
 from server.secret_store import decrypt_secret, encrypt_secret
 from server.time_utils import utc_now
-from server.user_runtime import apply_execution_results_to_user, normalize_push_notifications, normalize_smtp_settings, runtime_login_valid, runtime_plan_required, sync_runtime_fields_to_user
+from server.user_runtime import apply_execution_results_to_user, normalize_push_notifications, normalize_smtp_settings, runtime_login_valid, runtime_plan_required, sanitize_execution_results, sync_runtime_fields_to_user
 from server.util.MessagePush import send_test_smtp_message
 from server.proxy_settings import (
     PROXY_SETTINGS_KEY,
@@ -82,6 +82,7 @@ IDEMPOTENCY_STATUS_PENDING = "pending"
 IDEMPOTENCY_STATUS_COMPLETED = "completed"
 IDEMPOTENCY_STATUS_FAILED = "failed"
 IDEMPOTENCY_TTL_SECONDS = 7 * 24 * 3600
+ALIPAY_OUT_REGISTER_NO_PATTERN = re.compile(r"^[A-Za-z0-9-]{1,128}$")
 
 
 def _report_makeup_batch_delay_seconds() -> float:
@@ -495,6 +496,11 @@ class ClockInMakeupRequest(BaseModel):
     target_type: Optional[str] = None
 
 
+class AlipayClockInContinueRequest(BaseModel):
+    out_register_no: str
+    target_type: str = "START"
+
+
 REPORT_META = {
     "daily": {
         "report_type": "day",
@@ -804,6 +810,35 @@ def _clockin_makeup_type_from_request(req: ClockInMakeupRequest) -> str:
     if target_type not in ("START", "END"):
         raise HTTPException(status_code=400, detail="补卡类型错误")
     return target_type
+
+
+def _alipay_continue_values(req: AlipayClockInContinueRequest) -> tuple[str, str]:
+    out_register_no = str(req.out_register_no or "").strip()
+    target_type = str(req.target_type or "").strip().upper()
+    if not ALIPAY_OUT_REGISTER_NO_PATTERN.fullmatch(out_register_no):
+        raise HTTPException(status_code=400, detail="支付宝验证登记编号格式错误")
+    if target_type not in ("START", "END"):
+        raise HTTPException(status_code=400, detail="打卡类型错误")
+    return out_register_no, target_type
+
+
+def _continue_alipay_clockin_for_user(
+    user: User,
+    out_register_no: str,
+    target_type: str,
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    config_data = user_to_config(user)
+    config = ConfigManager(config=config_data)
+    api_client = ApiClient(config)
+    _ensure_remote_runtime(api_client, config)
+    result = perform_clock_in(
+        api_client,
+        config,
+        forced_checkin_type=target_type,
+        out_register_no=out_register_no,
+    )
+    apply_execution_results_to_user(user, [result], config_data)
+    return result, config_data
 
 
 def _makeup_clockin_for_user(user: User, target_dates: List[str], target_type: str) -> tuple[Dict[str, Any], Dict[str, Any]]:
@@ -1510,6 +1545,40 @@ def app_run(
     session.add(user)
     session.commit()
     return {"results": results}
+
+
+@router.post("/app/clock-in/alipay/continue")
+def app_continue_alipay_clockin(
+    *,
+    request: Request,
+    req: AlipayClockInContinueRequest,
+    session: Session = Depends(get_session),
+    payload: dict = Depends(get_user),
+):
+    app_user = _get_authed_app_user(session=session, payload=payload)
+    user = _get_bound_task_user(session=session, app_user=app_user)
+    out_register_no, target_type = _alipay_continue_values(req)
+    client_ip = get_client_ip(request)
+    _rate_limit(f"app_run:{client_ip}:{user.id}", limit=3, per_seconds=60)
+
+    result, _ = _continue_alipay_clockin_for_user(
+        user,
+        out_register_no,
+        target_type,
+    )
+    session.add(
+        AuditLog(
+            tenant_id=user.tenant_id,
+            actor=str(payload.get("sub")),
+            action="app.clockin.alipay.continue",
+            target_user_id=user.id,
+            detail={"status": result.get("status"), "target_type": target_type},
+        )
+    )
+    session.add(user)
+    session.commit()
+    return {"result": result}
+
 
 @router.get("/app/execution")
 def app_execution(*, session: Session = Depends(get_session), payload: dict = Depends(get_user)):
@@ -3239,7 +3308,7 @@ def run_user_task(
                 tenant_id=tenant_id,
                 logical_key=_manual_operation_idempotency_storage_key("user.run", idempotency_key),
                 request_hash=request_hash,
-                response=response_payload,
+                response={"results": sanitize_execution_results(results)},
             )
         session.add(AuditLog(tenant_id=user.tenant_id, actor=operator.get("sub"), action="user.run", target_user_id=user_id, detail={"status": status}))
         session.add(user)
@@ -3260,6 +3329,40 @@ def run_user_task(
             except Exception:
                 logger.debug("failed to finalize idempotency state", exc_info=True)
         raise
+
+
+@router.post("/users/{user_id}/clock-in/alipay/continue")
+def continue_user_alipay_clockin(
+    *,
+    request: Request,
+    req: AlipayClockInContinueRequest,
+    session: Session = Depends(get_session),
+    user_id: int,
+    operator: dict = Depends(require_tasks_run),
+):
+    out_register_no, target_type = _alipay_continue_values(req)
+    client_ip = get_client_ip(request)
+    _rate_limit(f"run:{client_ip}:{user_id}", limit=2, per_seconds=60)
+    user = _get_active_user_for_payload(session, user_id, operator)
+
+    result, _ = _continue_alipay_clockin_for_user(
+        user,
+        out_register_no,
+        target_type,
+    )
+    session.add(
+        AuditLog(
+            tenant_id=user.tenant_id,
+            actor=operator.get("sub"),
+            action="user.clockin.alipay.continue",
+            target_user_id=user_id,
+            detail={"status": result.get("status"), "target_type": target_type},
+        )
+    )
+    session.add(user)
+    session.commit()
+    return {"result": result}
+
 
 class BatchRunRequest(BaseModel):
     ids: List[int]

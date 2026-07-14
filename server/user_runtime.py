@@ -12,10 +12,28 @@ SUPPORTED_PUSH_TYPES = [SERVER_PUSH_TYPE, SMTP_PUSH_TYPE]
 SMTP_HOST = "smtp.qq.com"
 SMTP_PORT = 465
 DEFAULT_SMTP_FROM = "工学云签到通知"
+SENSITIVE_EXECUTION_FIELDS = {"outRegisterNo", "registerUrl", "out_register_no"}
 
 
 def _json_copy(value: Any) -> Any:
     return copy.deepcopy(value)
+
+
+def _strip_sensitive_execution_fields(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _strip_sensitive_execution_fields(item)
+            for key, item in value.items()
+            if key not in SENSITIVE_EXECUTION_FIELDS
+        }
+    if isinstance(value, list):
+        return [_strip_sensitive_execution_fields(item) for item in value]
+    return value
+
+
+def sanitize_execution_results(results: Any) -> List[Dict[str, Any]]:
+    items = results if isinstance(results, list) else []
+    return _strip_sensitive_execution_fields(_json_copy(items))
 
 
 def _as_dict(value: Any) -> Dict[str, Any]:
@@ -236,6 +254,6 @@ def apply_execution_results_to_user(
     if log_summary:
         user.logs = log_summary
 
-    user.last_execution_result = items
+    user.last_execution_result = sanitize_execution_results(items)
     sync_runtime_fields_to_user(user, config_data)
     return status

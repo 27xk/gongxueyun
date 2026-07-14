@@ -293,6 +293,13 @@
       </el-button>
     </div>
   </div>
+
+  <AlipayVerificationDialog
+    v-model="verificationVisible"
+    :register-url="verification?.registerUrl || ''"
+    :continuing="verificationContinuing"
+    @continue="continueClockIn"
+  />
 </template>
 
 <script setup>
@@ -300,6 +307,7 @@ import { ref, onMounted, onUnmounted, computed, h, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import { http } from '../api/http'
+import AlipayVerificationDialog from '../components/AlipayVerificationDialog.vue'
 import { useAuthStore } from '../stores/auth'
 import { notifySuccess, notifyError, notifyInfo, resolveErrorMessage } from '../utils/notify'
 
@@ -330,6 +338,10 @@ const remarkVisible = ref(false)
 const remarkSaving = ref(false)
 const remarkText = ref('')
 const remarkUserId = ref(null)
+const verificationVisible = ref(false)
+const verificationContinuing = ref(false)
+const verification = ref(null)
+const verificationUserId = ref(null)
 const router = useRouter()
 const auth = useAuthStore()
 const canWrite = computed(() => auth.canWrite)
@@ -510,6 +522,28 @@ const manualRefresh = async () => {
   notifySuccess('列表已刷新')
 }
 
+const showAlipayVerification = (results, id) => {
+  const item = (Array.isArray(results) ? results : []).find((entry) => {
+    const details = entry?.details
+    return (
+      entry?.status === 'fail' &&
+      details?.outRegisterNo &&
+      String(details?.registerUrl || '').startsWith('alipays://')
+    )
+  })
+  if (!item) return false
+
+  const targetType = String(item.details?.target_type || 'START').toUpperCase()
+  verification.value = {
+    outRegisterNo: String(item.details.outRegisterNo),
+    registerUrl: String(item.details.registerUrl),
+    targetType: ['START', 'END'].includes(targetType) ? targetType : 'START',
+  }
+  verificationUserId.value = id
+  verificationVisible.value = true
+  return true
+}
+
 const runTask = async (id) => {
   const user = users.value.find(u => u.id === id)
   if (!user) return
@@ -518,13 +552,50 @@ const runTask = async (id) => {
   try {
     showInfo('正在执行任务')
     await flushUiMessage()
-    await http.post(`/users/${id}/run`)
-    notifySuccess('任务执行完成')
+    const res = await http.post(`/users/${id}/run`)
+    const needsVerification = showAlipayVerification(res.data?.results, id)
+    if (needsVerification) {
+      notifyInfo('需要完成支付宝安全验证')
+    } else {
+      notifySuccess('任务执行完成')
+    }
     fetchUsers()
   } catch (error) {
     notifyError(`执行失败：${resolveErrorMessage(error, '请求失败')}`)
   } finally {
     user.running = false
+  }
+}
+
+const continueClockIn = async () => {
+  if (!verification.value || !verificationUserId.value || verificationContinuing.value) return
+  verificationContinuing.value = true
+  try {
+    const res = await http.post(
+      `/users/${verificationUserId.value}/clock-in/alipay/continue`,
+      {
+        out_register_no: verification.value.outRegisterNo,
+        target_type: verification.value.targetType,
+      }
+    )
+    const result = res.data?.result
+    if (showAlipayVerification([result], verificationUserId.value)) {
+      notifyInfo('仍需完成支付宝安全验证，验证信息已更新')
+      return
+    }
+    if (['success', 'skip'].includes(result?.status)) {
+      verificationVisible.value = false
+      verification.value = null
+      verificationUserId.value = null
+      notifySuccess(result?.message || '打卡完成')
+      await fetchUsers()
+      return
+    }
+    notifyError(result?.message || '继续打卡失败')
+  } catch (error) {
+    notifyError(resolveErrorMessage(error, '继续打卡失败'))
+  } finally {
+    verificationContinuing.value = false
   }
 }
 

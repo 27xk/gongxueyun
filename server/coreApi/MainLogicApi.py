@@ -260,7 +260,7 @@ class ApiClient:
     """
     BASE_URL = "https://api.moguding.net:9000/"
     DEFAULT_HEADERS = {
-        "user-agent": "Dart/2.17 (dart:io)",
+        "user-agent": "Dart/3.7 (dart:io)",
         "content-type": "application/json; charset=utf-8",
         "accept-encoding": "gzip",
         "host": "api.moguding.net:9000",
@@ -536,12 +536,9 @@ class ApiClient:
                 code = rsp.get("code")
                 msg = rsp.get("msg", "未知错误")
 
-                # 特殊情况处理
+                # HTTP 成功不等于打卡业务成功，业务方法负责处理 302/304。
                 if code == 200:
-                    if msg == "302":
-                        raise ValueError("打卡失败，触发行为验证码")
                     return rsp
-                
                 if code == 6111:
                     return rsp
 
@@ -926,7 +923,47 @@ class ApiClient:
             str(address),
         ]
 
-    def _submit_clock_in_payload(self, checkin_info: Dict[str, Any], *, replace: bool = False) -> None:
+    def create_alipay_clockin_verification(self) -> Dict[str, str]:
+        """创建支付宝打卡安全验证登记。"""
+        response = self._post_request(
+            "usercenter/alipay/v1/createAxdjk",
+            self._get_authenticated_headers(),
+            {"t": aes_encrypt(str(int(time.time() * 1000)))},
+        )
+        data = response.get("data") if isinstance(response, dict) else None
+        if (
+            not isinstance(response, dict)
+            or response.get("code") != 200
+            or response.get("msg") != "success"
+            or not isinstance(data, dict)
+        ):
+            raise ValueError("创建支付宝安全验证失败")
+
+        out_register_no = data.get("outRegisterNo")
+        register_url = data.get("registerUrl")
+        if not isinstance(out_register_no, str) or not isinstance(register_url, str):
+            raise ValueError("支付宝安全验证响应不完整")
+
+        out_register_no = out_register_no.strip()
+        register_url = register_url.strip()
+        if not out_register_no or not register_url:
+            raise ValueError("支付宝安全验证响应不完整")
+        if (
+            not register_url.startswith("alipays://")
+            or urlparse(register_url).scheme.lower() != "alipays"
+        ):
+            raise ValueError("支付宝安全验证链接无效")
+        return {
+            "outRegisterNo": out_register_no,
+            "registerUrl": register_url,
+        }
+
+    def _submit_clock_in_payload(
+        self,
+        checkin_info: Dict[str, Any],
+        *,
+        replace: bool = False,
+    ) -> Dict[str, str]:
         """提交普通打卡或补卡请求。"""
         url = "attendence/clock/teacher/v2/save"
         planId = self.config.get_value("planInfo.planId")
@@ -942,8 +979,8 @@ class ApiClient:
             "distance", "content", "lastAddress", "lastDetailAddress", "attendanceId", 
             "country", "createBy", "createTime", "description", "device", "images", 
             "isDeleted", "isReplace", "modifiedBy", "modifiedTime", "schoolId", 
-            "state", "teacherId", "teacherNumber", "type", "stuId", "planId", 
-            "attendanceType", "username","isBeyondFenceStu", "attachments", "userId", "isSYN", 
+            "state", "teacherId", "teacherNumber", "type", "captcha", "appUuid", "isFirstSignInWeb", "stuId", "planId",
+            "attendanceType", "username", "isBeyondFenceStu", "attachments", "userId", "isSYN",
             "studentId", "applyState", "studentNumber", "memberNumber", "headImg", 
             "attendenceTime", "depName", "majorName", "className", "logDtoList", 
             "isBeyondFence", "practiceAddress", "tpJobId","jobAddress","jobAddrPoint","certifyId","outRegisterNo","t"
@@ -968,8 +1005,9 @@ class ApiClient:
             "attendanceType": "REPLACE" if replace else checkin_info.get("attendanceType", None),
             "attachments": checkin_info.get("attachments", None),
             "userId": self.config.get_value("userInfo.userId"),
-            "lastDetailAddress": checkin_info.get("lastDetailAddress"),
+            # The v6 endpoint rejects the legacy lastDetailAddress field.
             "attendenceTime": None if replace else clockin_time,
+            "outRegisterNo": checkin_info.get("outRegisterNo"),
             "t": aes_encrypt(str(int(time.time() * 1000))),
         })
 
@@ -982,20 +1020,25 @@ class ApiClient:
         if replace and self.config.get_value("userInfo.userType") != "teacher":
             headers["user-agent"] = "Dart/3.7 (dart:io)"
             headers["content-type"] = "application/json"
-
         response = self._post_request(url, headers, data)
         if response.get("msg") == "302":
             logger.info("检测到行为验证码，正在通过···")
             data["captcha"] = self.solve_click_word_captcha()
-            self._post_request(url, headers, data)
+            response = self._post_request(url, headers, data)
+        if response.get("msg") == "302":
+            raise ValueError("打卡失败，行为验证码未通过")
+        if response.get("msg") == "304":
+            registration = self.create_alipay_clockin_verification()
+            return {"status": "verification_required", **registration}
+        return {"status": "success"}
 
-    def submit_clock_in(self, checkin_info: Dict[str, Any]) -> None:
+    def submit_clock_in(self, checkin_info: Dict[str, Any]) -> Dict[str, str]:
         """提交打卡信息"""
-        self._submit_clock_in_payload(checkin_info, replace=False)
+        return self._submit_clock_in_payload(checkin_info, replace=False)
 
-    def submit_clock_in_replace(self, checkin_info: Dict[str, Any]) -> None:
+    def submit_clock_in_replace(self, checkin_info: Dict[str, Any]) -> Dict[str, str]:
         """提交补卡信息"""
-        self._submit_clock_in_payload(checkin_info, replace=True)
+        return self._submit_clock_in_payload(checkin_info, replace=True)
 
     def get_upload_token(self) -> str:
         """获取上传文件的认证令牌"""

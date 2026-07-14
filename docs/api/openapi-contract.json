@@ -316,6 +316,35 @@
         "tags": []
       }
     },
+    "/api/app/clock-in/alipay/continue": {
+      "post": {
+        "operation_id": "app_continue_alipay_clockin_api_app_clock_in_alipay_continue_post",
+        "parameters": [],
+        "request_body": {
+          "content": {
+            "application/json": {
+              "$ref": "#/components/schemas/AlipayClockInContinueRequest"
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {}
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "$ref": "#/components/schemas/HTTPValidationError"
+              }
+            }
+          }
+        },
+        "tags": []
+      }
+    },
     "/api/app/clock-in/makeup": {
       "post": {
         "operation_id": "app_clockin_makeup_api_app_clock_in_makeup_post",
@@ -1585,6 +1614,44 @@
         "tags": []
       }
     },
+    "/api/users/{user_id}/clock-in/alipay/continue": {
+      "post": {
+        "operation_id": "continue_user_alipay_clockin_api_users__user_id__clock_in_alipay_continue_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "request_body": {
+          "content": {
+            "application/json": {
+              "$ref": "#/components/schemas/AlipayClockInContinueRequest"
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {}
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "$ref": "#/components/schemas/HTTPValidationError"
+              }
+            }
+          }
+        },
+        "tags": []
+      }
+    },
     "/api/users/{user_id}/clock-in/makeup": {
       "post": {
         "operation_id": "makeup_user_clockin_api_users__user_id__clock_in_makeup_post",
@@ -2270,6 +2337,20 @@
         "apiUrl",
         "apikey",
         "model"
+      ],
+      "type": "object"
+    },
+    "AlipayClockInContinueRequest": {
+      "properties": {
+        "out_register_no": {
+          "type": "string"
+        },
+        "target_type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "out_register_no"
       ],
       "type": "object"
     },
@@ -2970,10 +3051,6 @@
     },
     "ValidationError": {
       "properties": {
-        "ctx": {
-          "type": "object"
-        },
-        "input": {},
         "loc": {
           "items": {
             "anyOf": [

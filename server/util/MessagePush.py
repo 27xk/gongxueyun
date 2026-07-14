@@ -10,6 +10,8 @@ from typing import Any, Dict, List
 
 import requests
 
+from server.user_runtime import sanitize_execution_results
+
 try:
     from main import _log_ctx
 except ImportError:
@@ -83,6 +85,7 @@ class MessagePusher:
 
     @classmethod
     def _generate_markdown_message(cls, results: List[Dict[str, Any]]) -> str:
+        results = sanitize_execution_results(results)
         status_counts = Counter(result.get("status", "unknown") for result in results)
         total_tasks = len(results)
         parts = [
@@ -119,6 +122,7 @@ class MessagePusher:
 
     @classmethod
     def _generate_html_message(cls, results: List[Dict[str, Any]]) -> str:
+        results = sanitize_execution_results(results)
         status_counts = Counter(result.get("status", "unknown") for result in results)
         total_tasks = len(results)
         html = [
