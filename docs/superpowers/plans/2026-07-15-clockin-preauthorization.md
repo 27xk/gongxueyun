@@ -470,7 +470,7 @@ git commit -m "feat(接口): 提供双端预授权 API"
 - 创建：`web/src/views/UserPreauthorizations.vue`
 - 创建：`tests/test_frontend_clockin_preauthorization.py`
 
-- [ ] **步骤 1：编写前端静态失败测试**
+- [x] **步骤 1：编写前端静态失败测试**
 
 断言共享页面和对话框的关键契约：
 
@@ -494,7 +494,7 @@ def test_dialog_has_two_open_methods_and_explicit_completion(self):
     self.assertNotIn("outRegisterNo", source)
 ```
 
-- [ ] **步骤 2：运行前端测试确认失败**
+- [x] **步骤 2：运行前端测试确认失败**
 
 运行：
 
@@ -504,7 +504,7 @@ python -m unittest tests.test_frontend_clockin_preauthorization
 
 预期：组件文件不存在。
 
-- [ ] **步骤 3：实现扁平表格页面**
+- [x] **步骤 3：实现扁平表格页面**
 
 `ClockInPreauthorizationPage.vue` 接收：
 
@@ -519,7 +519,7 @@ const props = defineProps({
 
 开始接口返回的数据只存入 `ref`，关闭对话框即清除。完成接口只提交 `registration_ticket`，成功后刷新当前 scope。直接支付宝 URL 必须以 `alipays://` 开头，浏览器 URL 必须以 `https://ds.alipay.com/` 开头，否则禁用对应按钮。
 
-- [ ] **步骤 4：运行前端测试、lint 和构建**
+- [x] **步骤 4：运行前端测试、lint 和构建**
 
 ```powershell
 python -m unittest tests.test_frontend_clockin_preauthorization
@@ -531,7 +531,7 @@ npm run build
 
 预期：静态契约、质量门和 Vite 构建全部通过。
 
-- [ ] **步骤 5：提交共享页面**
+- [x] **步骤 5：提交共享页面**
 
 ```powershell
 git add web/src/components/ClockInPreauthorizationDialog.vue web/src/components/ClockInPreauthorizationPage.vue web/src/views/user/UserPreauthorizations.vue web/src/views/UserPreauthorizations.vue tests/test_frontend_clockin_preauthorization.py
@@ -548,7 +548,7 @@ git commit -m "feat(前端): 添加预授权列表页面"
 - 修改：`web/src/views/UserEdit.vue`
 - 修改：`tests/test_frontend_clockin_preauthorization.py`
 
-- [ ] **步骤 1：扩展失败测试**
+- [x] **步骤 1：扩展失败测试**
 
 断言：
 
@@ -562,11 +562,11 @@ self.assertIn("goPreauthorization", user_edit_source)
 
 同时断言管理端路由要求 `tasks:run`，用户列表移动端下拉菜单有预授权命令。
 
-- [ ] **步骤 2：运行测试确认失败**
+- [x] **步骤 2：运行测试确认失败**
 
 运行前端静态测试，预期路由和入口断言失败。
 
-- [ ] **步骤 3：实现路由和入口**
+- [x] **步骤 3：实现路由和入口**
 
 新增路由：
 
@@ -588,7 +588,7 @@ self.assertIn("goPreauthorization", user_edit_source)
 
 用户端导航增加「预授权」。用户列表桌面操作和移动端「更多」增加入口；用户编辑页仅在 `isEdit` 时显示入口。
 
-- [ ] **步骤 4：运行前端完整验证**
+- [x] **步骤 4：运行前端完整验证**
 
 运行：
 
@@ -602,7 +602,7 @@ npm run build
 
 预期：路由、旧即时验证和构建全部通过。
 
-- [ ] **步骤 5：提交双端入口**
+- [x] **步骤 5：提交双端入口**
 
 ```powershell
 git add web/src/router/index.js web/src/views/user/UserLayout.vue web/src/views/UserList.vue web/src/views/UserEdit.vue tests/test_frontend_clockin_preauthorization.py
@@ -622,7 +622,7 @@ git commit -m "feat(前端): 接入双端预授权入口"
 - 修改：`CHANGELOG.md`
 - 修改：`tests/test_openapi_contract.py`
 
-- [ ] **步骤 1：运行 OpenAPI 检查确认快照过期**
+- [x] **步骤 1：运行 OpenAPI 检查确认快照过期**
 
 ```powershell
 python -m dotenv -f "F:\code\szxm\automoguding-saas\.env" run -- python scripts/openapi_contract.py
@@ -630,7 +630,7 @@ python -m dotenv -f "F:\code\szxm\automoguding-saas\.env" run -- python scripts/
 
 预期：失败并提示运行 `python scripts/openapi_contract.py --write`。
 
-- [ ] **步骤 2：生成契约快照**
+- [x] **步骤 2：生成契约快照**
 
 ```powershell
 python -m dotenv -f "F:\code\szxm\automoguding-saas\.env" run -- python scripts/openapi_contract.py --write
@@ -638,7 +638,7 @@ python -m dotenv -f "F:\code\szxm\automoguding-saas\.env" run -- python scripts/
 
 检查快照包含 6 个预授权路由、开始/完成请求模型和分页字段，且不包含 `out_register_no` 响应字段。
 
-- [ ] **步骤 3：更新正式文档**
+- [x] **步骤 3：更新正式文档**
 
 文档明确记录：
 
@@ -650,7 +650,7 @@ python -m dotenv -f "F:\code\szxm\automoguding-saas\.env" run -- python scripts/
 - 首次不带凭据、真实 `304` 后原子消费并只重试一次。
 - 迁移、备份、常见错误和「需重新授权」排障。
 
-- [ ] **步骤 4：验证文档和契约**
+- [x] **步骤 4：验证文档和契约**
 
 ```powershell
 python -m dotenv -f "F:\code\szxm\automoguding-saas\.env" run -- python -m unittest tests.test_openapi_contract
@@ -660,7 +660,7 @@ git diff --check
 
 预期：OpenAPI 与快照一致，Git 空白检查通过。
 
-- [ ] **步骤 5：提交文档契约**
+- [x] **步骤 5：提交文档契约**
 
 ```powershell
 git add docs/api/openapi-contract.json README.md server/README.md web/README.md docs/current-features.md docs/ops/runbook.md CHANGELOG.md tests/test_openapi_contract.py
@@ -673,7 +673,7 @@ git commit -m "docs(打卡): 补充预授权使用与运维说明"
 
 - 可能修改：任务 1-8 涉及的代码、测试和文档文件
 
-- [ ] **步骤 1：运行完整后端验证**
+- [x] **步骤 1：运行完整后端验证**
 
 ```powershell
 python -m dotenv -f "F:\code\szxm\automoguding-saas\.env" run -- python -m unittest discover -s tests
@@ -688,7 +688,7 @@ pip-audit -r server/requirements.txt
 
 预期：所有命令退出码为 `0`。
 
-- [ ] **步骤 2：运行完整前端验证**
+- [x] **步骤 2：运行完整前端验证**
 
 ```powershell
 Set-Location web
@@ -718,11 +718,11 @@ docker build -t automoguding-saas:preauthorization-test .
 
 预期：迁移可升级、降级、再升级，Docker 镜像构建成功。
 
-- [ ] **步骤 4：启动应用并检查桌面/移动页面**
+- [x] **步骤 4：启动应用并检查桌面/移动页面**
 
 使用后端和 Vite 开发服务器启动功能分支。以管理员和用户身份分别检查：主列表、过去折叠区、开始授权对话框、两种 URL、取消、完成、刷新计划、空状态和错误状态。桌面宽度 `1440 × 900`、移动宽度 `390 × 844` 均不得出现文字遮挡、按钮溢出或横向页面滚动。
 
-- [ ] **步骤 5：执行端到端业务逻辑审查**
+- [x] **步骤 5：执行端到端业务逻辑审查**
 
 逐项用测试或受控 Mock 重放以下链路：
 
@@ -740,7 +740,7 @@ docker build -t automoguding-saas:preauthorization-test .
 
 发现缺陷时先增加最小复现测试，确认失败，再修复并重跑相关聚焦测试与完整套件。
 
-- [ ] **步骤 6：提交审查修复和最终验证记录**
+- [x] **步骤 6：提交审查修复和最终验证记录**
 
 若审查产生代码修复：
 
