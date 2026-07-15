@@ -227,6 +227,8 @@ python -m alembic upgrade head
 
 列表接口支持 `scope=future|past`、`page`、`page_size`、`status`、`target_type` 和 `refresh_plan`。开始授权请求体为 `target_date`、`target_type`；响应包含 30 分钟有效的 `registration_ticket`、`direct_url`、`browser_url`、`started_at` 和 `expires_at`。确认完成接口只接收 `registration_ticket`。
 
+双端开始和完成动作均按客户端 IP 与用户 ID 组合限流，每分钟最多 30 次；列表接口每分钟最多 30 次。该限制允许连续预存未来日期，同时隔离不同用户的授权流量。
+
 日期生成规则：
 
 | 范围 | 记录类型 | 规则 |
@@ -257,6 +259,8 @@ python -m alembic upgrade head
 3. 首次返回 `304` 时，任务 Hook 原子领取同一用户、日期和类型的凭据。
 4. 领取成功后携带凭据重试 1 次；第二次仍为 `304` 时停止并要求重新授权。
 5. 没有可用凭据时，普通打卡创建即时验证登记；补卡返回需要验证的失败结果。
+
+预授权 Hook 会注入定时任务、用户端和管理端手动任务、补卡任务及批量队列 worker。不同入口并发执行时，数据库条件更新保证同一凭据最多被领取 1 次。
 
 即时验证继续请求仍包含必填 `out_register_no` 和默认值为 `START` 的 `target_type`。用户端和管理端分别校验绑定关系或 `tasks:run` 权限后只提交 1 次。即时登记只存在于当次响应和页面内存；预授权登记编号在确认前封装于签名票据，确认后保存在预授权表，消费时短暂进入原子 claim 对象。两者都不得进入日志、审计详情、通知、执行历史或列表响应。
 
