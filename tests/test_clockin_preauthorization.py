@@ -1,8 +1,9 @@
 import datetime
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from urllib.parse import parse_qsl, urlsplit
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
@@ -348,6 +349,40 @@ class ClockInPreauthorizationStorageTest(unittest.TestCase):
         with Session(self.engine) as session:
             self.assertEqual(len(session.exec(select(ClockInPreauthorization)).all()), 1)
 
+    def test_complete_locks_existing_target_before_reauthorization(self):
+        ticket = self._ticket()
+        existing = ClockInPreauthorization(
+            id=10,
+            tenant_id="tenant-a",
+            user_id=self.user_id,
+            target_date=datetime.date(2026, 7, 16),
+            target_type="START",
+            status="authorized",
+            out_register_no="register-1",
+            authorized_at=utc_now(),
+        )
+        query_result = Mock()
+        query_result.first.return_value = existing
+        session = Mock()
+        session.exec.side_effect = [query_result, query_result]
+
+        with Session(self.engine) as source_session, patch(
+            "server.auth._secret",
+            return_value=b"test-secret" * 4,
+        ):
+            result = complete_preauthorization(
+                session,
+                user=self._user(source_session),
+                ticket=ticket,
+                today=datetime.date(2026, 7, 15),
+            )
+
+        probe_statement = session.exec.call_args_list[0].args[0]
+        lock_statement = session.exec.call_args_list[1].args[0]
+        self.assertIs(result, existing)
+        self.assertIsNone(probe_statement._for_update_arg)
+        self.assertIsNotNone(lock_statement._for_update_arg)
+
     def test_complete_different_ticket_does_not_overwrite_authorized_record(self):
         first_ticket = self._ticket(out_register_no="register-1")
         second_ticket = self._ticket(out_register_no="register-2")
@@ -368,6 +403,77 @@ class ClockInPreauthorizationStorageTest(unittest.TestCase):
                     ticket=second_ticket,
                     today=datetime.date(2026, 7, 15),
                 )
+
+    def test_concurrent_insert_of_same_ticket_returns_winning_record(self):
+        ticket = self._ticket(out_register_no="register-1")
+        with Session(self.engine) as source_session:
+            user = self._user(source_session)
+
+        winner = ClockInPreauthorization(
+            id=20,
+            tenant_id="tenant-a",
+            user_id=self.user_id,
+            target_date=datetime.date(2026, 7, 16),
+            target_type="START",
+            status="authorized",
+            out_register_no="register-1",
+            authorized_at=utc_now(),
+        )
+        initial_result = Mock()
+        initial_result.first.return_value = None
+        winner_result = Mock()
+        winner_result.first.return_value = winner
+        session = Mock()
+        session.exec.side_effect = [initial_result, winner_result]
+        session.flush.side_effect = IntegrityError("insert", {}, Exception("unique"))
+
+        with patch("server.auth._secret", return_value=b"test-secret" * 4):
+            result = complete_preauthorization(
+                session,
+                user=user,
+                ticket=ticket,
+                today=datetime.date(2026, 7, 15),
+            )
+
+        self.assertIs(result, winner)
+        session.rollback.assert_called_once()
+        self.assertIsNone(session.exec.call_args_list[0].args[0]._for_update_arg)
+
+    def test_concurrent_insert_of_different_ticket_returns_business_conflict(self):
+        ticket = self._ticket(out_register_no="register-2")
+        with Session(self.engine) as source_session:
+            user = self._user(source_session)
+
+        winner = ClockInPreauthorization(
+            id=20,
+            tenant_id="tenant-a",
+            user_id=self.user_id,
+            target_date=datetime.date(2026, 7, 16),
+            target_type="START",
+            status="authorized",
+            out_register_no="register-1",
+            authorized_at=utc_now(),
+        )
+        initial_result = Mock()
+        initial_result.first.return_value = None
+        winner_result = Mock()
+        winner_result.first.return_value = winner
+        session = Mock()
+        session.exec.side_effect = [initial_result, winner_result]
+        session.flush.side_effect = IntegrityError("insert", {}, Exception("unique"))
+
+        with (
+            patch("server.auth._secret", return_value=b"test-secret" * 4),
+            self.assertRaisesRegex(ValueError, "该日期已有有效预授权"),
+        ):
+            complete_preauthorization(
+                session,
+                user=user,
+                ticket=ticket,
+                today=datetime.date(2026, 7, 15),
+            )
+
+        session.rollback.assert_called_once()
 
     def test_consumed_record_can_be_reauthorized(self):
         first_ticket = self._ticket(out_register_no="register-1")
@@ -532,6 +638,7 @@ class ClockInPreauthorizationStorageTest(unittest.TestCase):
             if item["target_date"] == "2026-07-16" and item["target_type"] == "START"
         )
         self.assertEqual(target["status"], "authorized")
+        self.assertTrue(target["authorized_at"].endswith("+00:00"))
         self.assertEqual(result["summary"]["authorized"], 1)
         self.assertNotIn("out_register_no", str(result))
 

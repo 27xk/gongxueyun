@@ -13,6 +13,7 @@ from server.clockin_preauthorization import (
     build_alipay_open_urls,
     build_preauthorization_hooks,
     complete_preauthorization,
+    iso_utc_datetime,
     issue_registration_ticket,
     list_preauthorizations,
     parse_plan_end_date,
@@ -94,6 +95,7 @@ IDEMPOTENCY_STATUS_COMPLETED = "completed"
 IDEMPOTENCY_STATUS_FAILED = "failed"
 IDEMPOTENCY_TTL_SECONDS = 7 * 24 * 3600
 ALIPAY_OUT_REGISTER_NO_PATTERN = re.compile(r"^[A-Za-z0-9-]{1,128}$")
+CLOCKIN_PREAUTHORIZATION_ACTION_LIMIT = 30
 
 
 def _report_makeup_batch_delay_seconds() -> float:
@@ -1013,8 +1015,8 @@ def _serialize_preauthorization_record(
         "target_date": row.target_date.isoformat(),
         "target_type": row.target_type,
         "status": row.status,
-        "authorized_at": row.authorized_at.isoformat(),
-        "consumed_at": row.consumed_at.isoformat() if row.consumed_at else None,
+        "authorized_at": iso_utc_datetime(row.authorized_at),
+        "consumed_at": iso_utc_datetime(row.consumed_at),
         "used_target_type": row.used_target_type,
     }
 
@@ -1853,7 +1855,11 @@ def app_start_clockin_preauthorization(
     app_user = _get_authed_app_user(session=session, payload=payload)
     user = _get_bound_task_user(session=session, app_user=app_user)
     client_ip = get_client_ip(request)
-    _rate_limit(f"app_preauthorization_start:{client_ip}:{user.id}", limit=5, per_seconds=60)
+    _rate_limit(
+        f"app_preauthorization_start:{client_ip}:{user.id}",
+        limit=CLOCKIN_PREAUTHORIZATION_ACTION_LIMIT,
+        per_seconds=60,
+    )
     try:
         result = _start_clockin_preauthorization_for_user(user, req, session=session)
     except ValueError as exc:
@@ -1891,7 +1897,11 @@ def app_complete_clockin_preauthorization(
     app_user = _get_authed_app_user(session=session, payload=payload)
     user = _get_bound_task_user(session=session, app_user=app_user)
     client_ip = get_client_ip(request)
-    _rate_limit(f"app_preauthorization_complete:{client_ip}:{user.id}", limit=10, per_seconds=60)
+    _rate_limit(
+        f"app_preauthorization_complete:{client_ip}:{user.id}",
+        limit=CLOCKIN_PREAUTHORIZATION_ACTION_LIMIT,
+        per_seconds=60,
+    )
     try:
         result = _complete_clockin_preauthorization_for_user(
             session,
@@ -3051,7 +3061,7 @@ def update_admin_user(
                 .where(
                     (AdminUser.tenant_id == tenant_id)
                     & (AdminUser.role == "admin")
-                    & (AdminUser.enabled == True)
+                    & (AdminUser.enabled.is_(True))
                 )
             ).one()
             if enabled_admins <= 1 and user.enabled is True:
@@ -3069,7 +3079,7 @@ def update_admin_user(
                 .where(
                     (AdminUser.tenant_id == tenant_id)
                     & (AdminUser.role == "admin")
-                    & (AdminUser.enabled == True)
+                    & (AdminUser.enabled.is_(True))
                 )
             ).one()
             if enabled_admins <= 1:
@@ -3751,7 +3761,11 @@ def start_user_clockin_preauthorization(
 ):
     user = _get_active_user_for_payload(session, user_id, operator)
     client_ip = get_client_ip(request)
-    _rate_limit(f"preauthorization_start:{client_ip}:{user_id}", limit=5, per_seconds=60)
+    _rate_limit(
+        f"preauthorization_start:{client_ip}:{user_id}",
+        limit=CLOCKIN_PREAUTHORIZATION_ACTION_LIMIT,
+        per_seconds=60,
+    )
     try:
         result = _start_clockin_preauthorization_for_user(user, req, session=session)
     except ValueError as exc:
@@ -3789,7 +3803,11 @@ def complete_user_clockin_preauthorization(
 ):
     user = _get_active_user_for_payload(session, user_id, operator)
     client_ip = get_client_ip(request)
-    _rate_limit(f"preauthorization_complete:{client_ip}:{user_id}", limit=10, per_seconds=60)
+    _rate_limit(
+        f"preauthorization_complete:{client_ip}:{user_id}",
+        limit=CLOCKIN_PREAUTHORIZATION_ACTION_LIMIT,
+        per_seconds=60,
+    )
     try:
         result = _complete_clockin_preauthorization_for_user(
             session,

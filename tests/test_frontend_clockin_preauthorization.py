@@ -21,6 +21,17 @@ class FrontendClockInPreauthorizationTest(unittest.TestCase):
         self.assertNotIn("localStorage", source)
         self.assertNotIn("outRegisterNo", source)
 
+    def test_shared_page_filters_large_lists_and_does_not_report_failed_refresh(self):
+        source = read("web/src/components/ClockInPreauthorizationPage.vue")
+
+        self.assertIn("status: future.status || undefined", source)
+        self.assertIn("target_type: future.targetType || undefined", source)
+        self.assertIn("status: past.status || undefined", source)
+        self.assertIn("applyFutureFilters", source)
+        self.assertIn("applyPastFilters", source)
+        self.assertIn("const futureLoaded = await loadFuture", source)
+        self.assertIn("if (!futureLoaded) return", source)
+
     def test_list_has_flat_table_mobile_rows_and_four_states(self):
         source = read("web/src/components/ClockInPreauthorizationList.vue")
 
@@ -41,6 +52,7 @@ class FrontendClockInPreauthorizationTest(unittest.TestCase):
         self.assertIn("浏览器打开", source)
         self.assertIn("支付宝打开", source)
         self.assertIn("我已完成授权", source)
+        self.assertIn("有效期至", source)
         self.assertIn("noopener,noreferrer", source)
         self.assertIn("startsWith('alipays://')", source)
         self.assertIn("startsWith('https://ds.alipay.com/')", source)

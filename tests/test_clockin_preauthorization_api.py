@@ -5,7 +5,6 @@ from unittest.mock import Mock, patch
 
 from server import api
 from server.models import ClockInPreauthorization, User
-from server.time_utils import utc_now
 
 
 def build_user():
@@ -114,6 +113,106 @@ class ClockInPreauthorizationApiTest(unittest.TestCase):
 
         api_client_type.assert_not_called()
 
+    def test_start_rate_limit_supports_bulk_future_authorization_on_both_surfaces(self):
+        user = build_user()
+        request = SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"))
+        req = api.ClockInPreauthorizationStartRequest(
+            target_date="2026-07-16",
+            target_type="START",
+        )
+        result = {
+            "registration_ticket": "ticket",
+            "direct_url": "alipays://direct",
+            "browser_url": "https://ds.alipay.com/?scheme=x",
+            "started_at": "2026-07-15T10:00:00+08:00",
+            "expires_at": "2026-07-15T10:30:00+08:00",
+        }
+
+        with (
+            patch.object(api, "_get_authed_app_user", return_value=Mock()),
+            patch.object(api, "_get_bound_task_user", return_value=user),
+            patch.object(api, "_rate_limit") as app_limit,
+            patch.object(
+                api,
+                "_start_clockin_preauthorization_for_user",
+                return_value=result,
+            ),
+        ):
+            api.app_start_clockin_preauthorization(
+                request=request,
+                req=req,
+                session=Mock(),
+                payload={"sub": "app:1"},
+            )
+
+        with (
+            patch.object(api, "_get_active_user_for_payload", return_value=user),
+            patch.object(api, "_rate_limit") as admin_limit,
+            patch.object(
+                api,
+                "_start_clockin_preauthorization_for_user",
+                return_value=result,
+            ),
+        ):
+            api.start_user_clockin_preauthorization(
+                request=request,
+                req=req,
+                user_id=user.id,
+                session=Mock(),
+                operator={"sub": "admin:1"},
+            )
+
+        completed = {
+            "id": 1,
+            "target_date": "2026-07-16",
+            "target_type": "START",
+            "status": "authorized",
+            "authorized_at": "2026-07-15T10:00:00+00:00",
+            "consumed_at": None,
+            "used_target_type": None,
+        }
+        complete_req = api.ClockInPreauthorizationCompleteRequest(
+            registration_ticket="ticket"
+        )
+        with (
+            patch.object(api, "_get_authed_app_user", return_value=Mock()),
+            patch.object(api, "_get_bound_task_user", return_value=user),
+            patch.object(api, "_rate_limit") as app_complete_limit,
+            patch.object(
+                api,
+                "_complete_clockin_preauthorization_for_user",
+                return_value=completed,
+            ),
+        ):
+            api.app_complete_clockin_preauthorization(
+                request=request,
+                req=complete_req,
+                session=Mock(),
+                payload={"sub": "app:1"},
+            )
+
+        with (
+            patch.object(api, "_get_active_user_for_payload", return_value=user),
+            patch.object(api, "_rate_limit") as admin_complete_limit,
+            patch.object(
+                api,
+                "_complete_clockin_preauthorization_for_user",
+                return_value=completed,
+            ),
+        ):
+            api.complete_user_clockin_preauthorization(
+                request=request,
+                req=complete_req,
+                user_id=user.id,
+                session=Mock(),
+                operator={"sub": "admin:1"},
+            )
+
+        self.assertEqual(app_limit.call_args.kwargs["limit"], 30)
+        self.assertEqual(admin_limit.call_args.kwargs["limit"], 30)
+        self.assertEqual(app_complete_limit.call_args.kwargs["limit"], 30)
+        self.assertEqual(admin_complete_limit.call_args.kwargs["limit"], 30)
+
     def test_complete_response_is_sanitized(self):
         row = ClockInPreauthorization(
             id=10,
@@ -123,7 +222,7 @@ class ClockInPreauthorizationApiTest(unittest.TestCase):
             target_type="START",
             status="authorized",
             out_register_no="register-secret",
-            authorized_at=utc_now(),
+            authorized_at=datetime.datetime(2026, 7, 15, 10, 0),
         )
         session = Mock()
 
@@ -136,6 +235,7 @@ class ClockInPreauthorizationApiTest(unittest.TestCase):
 
         self.assertEqual(result["status"], "authorized")
         self.assertEqual(result["target_type"], "START")
+        self.assertEqual(result["authorized_at"], "2026-07-15T10:00:00+00:00")
         self.assertNotIn("out_register_no", result)
         self.assertNotIn("register-secret", str(result))
 

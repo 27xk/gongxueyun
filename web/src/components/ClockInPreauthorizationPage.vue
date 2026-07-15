@@ -24,6 +24,8 @@ const createListState = () => reactive({
   page: 1,
   pageSize: PAGE_SIZE,
   total: 0,
+  status: '',
+  targetType: '',
   loading: false,
   loaded: false,
 })
@@ -88,13 +90,17 @@ const loadFuture = async ({ refreshPlan = false } = {}) => {
         scope: 'future',
         page: future.page,
         page_size: future.pageSize,
+        status: future.status || undefined,
+        target_type: future.targetType || undefined,
         refresh_plan: refreshPlan,
       },
     })
     updateState(future, response.data)
     updateMetadata(response.data)
+    return true
   } catch (error) {
     notifyError(resolveErrorMessage(error, '加载预授权列表失败'))
+    return false
   } finally {
     future.loading = false
   }
@@ -108,12 +114,15 @@ const loadPast = async () => {
         scope: 'past',
         page: past.page,
         page_size: past.pageSize,
+        status: past.status || undefined,
       },
     })
     updateState(past, response.data)
     updateMetadata(response.data)
+    return true
   } catch (error) {
     notifyError(resolveErrorMessage(error, '加载历史补卡预授权失败'))
+    return false
   } finally {
     past.loading = false
   }
@@ -121,10 +130,12 @@ const loadPast = async () => {
 
 const refreshPlan = async () => {
   future.page = 1
-  await loadFuture({ refreshPlan: true })
+  const futureLoaded = await loadFuture({ refreshPlan: true })
+  if (!futureLoaded) return
   if (pastExpanded.value) {
     past.page = 1
-    await loadPast()
+    const pastLoaded = await loadPast()
+    if (!pastLoaded) return
   } else {
     past.loaded = false
   }
@@ -144,6 +155,27 @@ const pageFuture = async (page) => {
 const pagePast = async (page) => {
   past.page = page
   await loadPast()
+}
+
+const applyFutureFilters = async () => {
+  future.page = 1
+  await loadFuture()
+}
+
+const resetFutureFilters = async () => {
+  future.status = ''
+  future.targetType = ''
+  await applyFutureFilters()
+}
+
+const applyPastFilters = async () => {
+  past.page = 1
+  await loadPast()
+}
+
+const resetPastFilters = async () => {
+  past.status = ''
+  await applyPastFilters()
 }
 
 const targetKey = (item) => `${item?.target_date || ''}-${item?.target_type || ''}`
@@ -235,6 +267,20 @@ onMounted(loadFuture)
         </div>
         <span class="section-count">共 {{ future.total }} 项</span>
       </div>
+      <div class="filter-row" aria-label="未来预授权筛选">
+        <el-select v-model="future.status" clearable placeholder="全部状态" size="small">
+          <el-option label="待授权" value="pending" />
+          <el-option label="已授权" value="authorized" />
+          <el-option label="已使用" value="consumed" />
+          <el-option label="需重新授权" value="reauthorize_required" />
+        </el-select>
+        <el-select v-model="future.targetType" clearable placeholder="全部类型" size="small">
+          <el-option label="上班" value="START" />
+          <el-option label="下班" value="END" />
+        </el-select>
+        <el-button size="small" type="primary" @click="applyFutureFilters">筛选</el-button>
+        <el-button size="small" @click="resetFutureFilters">清除</el-button>
+      </div>
       <ClockInPreauthorizationList
         :items="future.items"
         :loading="future.loading || !!startingKey"
@@ -262,6 +308,16 @@ onMounted(loadFuture)
       </button>
       <el-collapse-transition>
         <div v-show="pastExpanded" class="past-content">
+          <div class="filter-row" aria-label="历史预授权筛选">
+            <el-select v-model="past.status" clearable placeholder="全部状态" size="small">
+              <el-option label="待授权" value="pending" />
+              <el-option label="已授权" value="authorized" />
+              <el-option label="已使用" value="consumed" />
+              <el-option label="需重新授权" value="reauthorize_required" />
+            </el-select>
+            <el-button size="small" type="primary" @click="applyPastFilters">筛选</el-button>
+            <el-button size="small" @click="resetPastFilters">清除</el-button>
+          </div>
           <ClockInPreauthorizationList
             :items="past.items"
             :loading="past.loading || !!startingKey"
@@ -375,6 +431,18 @@ onMounted(loadFuture)
   margin-bottom: 14px;
 }
 
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.filter-row :deep(.el-select) {
+  width: 150px;
+}
+
 .past-section {
   padding: 0;
   overflow: hidden;
@@ -420,7 +488,7 @@ onMounted(loadFuture)
   border-top: 1px solid var(--el-border-color-lighter);
 }
 
-.past-content :deep(.preauthorization-list) {
+.past-content > .filter-row {
   padding-top: 16px;
 }
 
@@ -452,6 +520,11 @@ onMounted(loadFuture)
 
   .past-content {
     padding: 0 14px 14px;
+  }
+
+  .filter-row :deep(.el-select) {
+    flex: 1 1 130px;
+    width: auto;
   }
 }
 

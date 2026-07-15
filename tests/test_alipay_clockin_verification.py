@@ -112,6 +112,10 @@ class AlipayApiClientTest(unittest.TestCase):
         path, headers, payload = client._post_request.call_args.args
         self.assertEqual(path, "usercenter/alipay/v1/createAxdjk")
         self.assertEqual(headers["authorization"], "test-token")
+        self.assertEqual(
+            headers["client_id"],
+            ApiClient.ALIPAY_VERIFICATION_CLIENT_ID,
+        )
         self.assertEqual(set(payload), {"t"})
         self.assertIsInstance(payload["t"], str)
         self.assertTrue(payload["t"])
@@ -164,6 +168,27 @@ class AlipayApiClientTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "支付宝安全验证响应不完整"):
             client.create_alipay_clockin_verification()
 
+    def test_create_alipay_verification_rejects_unsafe_registration_number(self):
+        for value in ("bad value", "bad/value", "x" * 129):
+            with self.subTest(value=value):
+                client = build_api_client()
+                client._post_request = Mock(
+                    return_value={
+                        "code": 200,
+                        "msg": "success",
+                        "data": {
+                            "outRegisterNo": value,
+                            "registerUrl": SAFE_REGISTRATION["registerUrl"],
+                        },
+                    }
+                )
+
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "支付宝安全验证登记编号无效",
+                ):
+                    client.create_alipay_clockin_verification()
+
     def test_initial_304_reports_verification_without_creating_registration(self):
         client = build_api_client()
         client._post_request = Mock(return_value={"code": 200, "msg": "304", "data": "verify"})
@@ -199,6 +224,15 @@ class AlipayApiClientTest(unittest.TestCase):
             SAFE_REGISTRATION["outRegisterNo"],
         )
         client.create_alipay_clockin_verification.assert_not_called()
+
+    def test_non_200_clockin_business_response_is_not_success(self):
+        client = build_api_client()
+        client._post_request = Mock(
+            return_value={"code": 6111, "msg": "clock-in verification failed", "data": None}
+        )
+
+        with self.assertRaisesRegex(ValueError, "clock-in verification failed"):
+            client.submit_clock_in(build_checkin_info())
 
     def test_behavior_captcha_still_retries_clockin_once(self):
         client = build_api_client()
@@ -348,8 +382,10 @@ class ClockInTaskResultTest(unittest.TestCase):
         self.assertEqual(result["status"], "fail")
         self.assertEqual(api_client.submit_clock_in.call_count, 2)
         hooks.require_reauthorization.assert_called_once_with(18)
-        api_client.create_alipay_clockin_verification.assert_called_once_with()
-        self.assertEqual(result["details"]["outRegisterNo"], SAFE_REGISTRATION["outRegisterNo"])
+        api_client.create_alipay_clockin_verification.assert_not_called()
+        self.assertIn("重新授权", result["message"])
+        self.assertNotIn("outRegisterNo", result["details"])
+        self.assertNotIn("registerUrl", result["details"])
 
     def test_makeup_uses_shared_day_authorization_with_actual_type(self):
         api_client = build_task_api_client(

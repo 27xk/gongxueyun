@@ -420,6 +420,7 @@ def perform_clock_in(
             if replace
             else api_client.submit_clock_in
         )
+        claimed_preauthorization = False
         submit_result = submit(checkin_info)
         if (
             isinstance(submit_result, dict)
@@ -437,6 +438,7 @@ def perform_clock_in(
                     used_target_type=checkin_type if replace else None,
                 )
             if claim is not None:
+                claimed_preauthorization = True
                 retry_info = dict(checkin_info)
                 retry_info["outRegisterNo"] = claim.out_register_no
                 submit_result = submit(retry_info)
@@ -454,7 +456,9 @@ def perform_clock_in(
         ):
             details = {"target_type": checkin_type}
             message = "补卡触发支付宝安全验证，本次补卡未完成"
-            if not replace:
+            if claimed_preauthorization:
+                message = "预授权验证未通过，请为该日期重新授权"
+            elif not replace:
                 registration = api_client.create_alipay_clockin_verification()
                 details.update(
                     {

@@ -31,10 +31,10 @@ const targetLabel = computed(() => {
   return '补卡'
 })
 
-const startedAtLabel = computed(() => {
-  if (!props.startedAt) return '-'
-  const parsed = new Date(props.startedAt)
-  if (Number.isNaN(parsed.getTime())) return props.startedAt
+const formatDateTime = (value) => {
+  if (!value) return '-'
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return value
   return new Intl.DateTimeFormat('zh-CN', {
     timeZone: 'Asia/Shanghai',
     year: 'numeric',
@@ -45,7 +45,10 @@ const startedAtLabel = computed(() => {
     second: '2-digit',
     hour12: false,
   }).format(parsed)
-})
+}
+
+const startedAtLabel = computed(() => formatDateTime(props.startedAt))
+const expiresAtLabel = computed(() => formatDateTime(props.expiresAt))
 
 const openBrowser = () => {
   if (!safeBrowserUrl.value || props.completing) return
@@ -83,8 +86,14 @@ const beforeClose = (done) => {
         选择一种方式打开支付宝并完成授权，返回本页后再确认完成。
       </p>
       <div class="authorization-meta">
-        <span>发起时间</span>
-        <strong>{{ startedAtLabel }}</strong>
+        <div class="meta-row">
+          <span>发起时间</span>
+          <strong>{{ startedAtLabel }}</strong>
+        </div>
+        <div class="meta-row">
+          <span>有效期至</span>
+          <strong>{{ expiresAtLabel }}</strong>
+        </div>
       </div>
       <el-alert
         v-if="!safeDirectUrl && !safeBrowserUrl"
@@ -147,9 +156,8 @@ const beforeClose = (done) => {
 }
 
 .authorization-meta {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
+  display: grid;
+  gap: 8px;
   padding: 10px 0;
   border-top: 1px solid var(--el-border-color-lighter);
   border-bottom: 1px solid var(--el-border-color-lighter);
@@ -157,7 +165,13 @@ const beforeClose = (done) => {
   color: var(--el-text-color-secondary);
 }
 
-.authorization-meta strong {
+.meta-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.meta-row strong {
   color: var(--el-text-color-primary);
   text-align: right;
 }

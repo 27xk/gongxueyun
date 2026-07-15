@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 from sqlalchemy import update
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from server.auth import issue_token, verify_token
@@ -287,8 +288,15 @@ def validate_preauthorization_target(
     raise ValueError("目标日期或类型不在预授权列表中")
 
 
-def _iso_datetime(value: datetime.datetime | None) -> str | None:
-    return value.isoformat() if isinstance(value, datetime.datetime) else None
+def iso_utc_datetime(value: datetime.datetime | None) -> str | None:
+    if not isinstance(value, datetime.datetime):
+        return None
+    normalized = value
+    if normalized.tzinfo is None:
+        normalized = normalized.replace(tzinfo=datetime.timezone.utc)
+    else:
+        normalized = normalized.astimezone(datetime.timezone.utc)
+    return normalized.isoformat()
 
 
 def _masked_account(value: str) -> str:
@@ -345,8 +353,8 @@ def list_preauthorizations(
                 "target_type": row.target_type,
                 "target_time": row.target_time,
                 "status": item_status,
-                "authorized_at": _iso_datetime(record.authorized_at if record else None),
-                "consumed_at": _iso_datetime(record.consumed_at if record else None),
+                "authorized_at": iso_utc_datetime(record.authorized_at if record else None),
+                "consumed_at": iso_utc_datetime(record.consumed_at if record else None),
                 "used_target_type": record.used_target_type if record else None,
                 "can_authorize": item_status != "authorized",
             }
@@ -414,6 +422,18 @@ def complete_preauthorization(
             & (ClockInPreauthorization.target_type == target_type)
         )
     ).first()
+    if existing is not None:
+        existing = session.exec(
+            select(ClockInPreauthorization)
+            .where(
+                (ClockInPreauthorization.id == existing.id)
+                & (ClockInPreauthorization.tenant_id == user.tenant_id)
+                & (ClockInPreauthorization.user_id == user.id)
+            )
+            .with_for_update()
+        ).first()
+        if existing is None:
+            raise ValueError("预授权状态已变化，请重新确认")
     if existing and existing.status == "authorized":
         if existing.out_register_no == out_register_no:
             return existing
@@ -422,7 +442,8 @@ def complete_preauthorization(
         raise ValueError("已使用的预授权登记不能重复启用")
 
     now = utc_now()
-    if existing is None:
+    is_new_record = existing is None
+    if is_new_record:
         existing = ClockInPreauthorization(
             tenant_id=user.tenant_id,
             user_id=user.id,
@@ -441,7 +462,29 @@ def complete_preauthorization(
         existing.used_target_type = None
         existing.updated_at = now
     session.add(existing)
-    session.flush()
+    try:
+        session.flush()
+    except IntegrityError as exc:
+        session.rollback()
+        if not is_new_record:
+            raise
+        winner = session.exec(
+            select(ClockInPreauthorization).where(
+                (ClockInPreauthorization.tenant_id == user.tenant_id)
+                & (ClockInPreauthorization.user_id == user.id)
+                & (ClockInPreauthorization.target_date == target_date)
+                & (ClockInPreauthorization.target_type == target_type)
+            )
+        ).first()
+        if winner is None:
+            raise
+        if winner.status == "authorized":
+            if winner.out_register_no == out_register_no:
+                return winner
+            raise ValueError("该日期已有有效预授权") from exc
+        if winner.out_register_no == out_register_no:
+            raise ValueError("已使用的预授权登记不能重复启用") from exc
+        raise ValueError("预授权状态已变化，请重新确认") from exc
     return existing
 
 
