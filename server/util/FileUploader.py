@@ -2,8 +2,6 @@ import os
 import io
 import logging
 import random
-from typing import Optional
-
 from PIL import Image
 
 from server.coreApi.FileUploadApi import upload

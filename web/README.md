@@ -21,7 +21,7 @@
 | 路径 | 页面 | 说明 |
 |------|------|------|
 | `/login` | 后台登录页 | 管理员入口 |
-| `/` | 用户列表 / 管理首页 | 已登录管理员访问根地址进入后台 |
+| `/` | 会话分流入口 | 管理员进入用户列表，用户进入 `/u`，未登录进入 `/u/login` |
 | `/create` | 新增用户页 | 创建用户与基础配置 |
 | `/edit/:id` | 用户编辑页 | 打卡、补卡、报告、单用户推送 |
 | `/audit` | 审计日志页 | 关键操作记录 |
@@ -79,13 +79,28 @@
 
 `/edit/:id` 对应 `UserEdit.vue`。管理端可在同一页完成用户的打卡、补卡、报告和推送配置，和用户端页面保持同一套字段口径。
 
+### 支付宝安全验证对话框
+
+`src/components/AlipayVerificationDialog.vue` 是管理端和用户端共享组件。登记编号和深链只保存在页面内存，不写入 `localStorage` 或 Pinia；前端只允许打开 `alipays://` 链接。
+
+| 调用端 | 触发响应 | 继续接口 |
+|--------|----------|----------|
+| 用户端 `UserHome.vue` | `/app/run` 的任务结果包含验证详情 | `POST /app/clock-in/alipay/continue` |
+| 管理端 `UserList.vue` | `/users/{id}/run` 的任务结果包含验证详情 | `POST /users/{id}/clock-in/alipay/continue` |
+
+用户点击「验证完成，继续打卡」后只发起 1 次请求。成功时关闭对话框；再次需要验证时替换登记信息；普通失败保留当前状态并显示后端错误。
+
 ## 开发命令
 
 | 命令 | 说明 |
 |------|------|
 | `cd web` | 进入前端目录 |
-| `npm install` | 安装依赖 |
+| `npm ci` | 按 `package-lock.json` 安装依赖，CI 和验证优先使用 |
 | `npm run dev` | 启动 Vite，默认监听 `0.0.0.0:5173` |
+| `npm audit --audit-level=high` | 检查高危及以上依赖漏洞 |
+| `npm run lint` | 运行前端质量门 |
+| `npm test` | 运行前端静态回归测试 |
+| `npm run build` | 生成生产构建到 `web/dist` |
 | `npm run preview` | 预览构建产物 |
 
 ### 环境变量
@@ -112,12 +127,14 @@ VITE_API_PROXY_TARGET=http://127.0.0.1:8147 npm run dev
 | 认证失败 | `401` 清空对应端登录态并跳转对应登录页 |
 | Cookie | 后端使用 HttpOnly Cookie；前端不把 token 放进 `localStorage` |
 | CSRF | 非安全方法由后端校验 CSRF，前端按 Axios 实例约定携带 |
+| 支付宝验证 | 两端复用共享对话框，继续接口按各自认证状态和用户范围调用 |
 
 ## 目录结构
 
 | 路径 | 说明 |
 |------|------|
 | `web/src/api/` | 管理端和用户端 Axios 实例 |
+| `web/src/components/` | 管理端和用户端共享组件 |
 | `web/src/router/` | 路由、认证守卫和入口分流 |
 | `web/src/stores/` | 管理端和用户端认证状态 |
 | `web/src/utils/` | 消息提示等前端工具 |

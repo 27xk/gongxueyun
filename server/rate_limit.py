@@ -4,7 +4,7 @@ import time
 from collections import OrderedDict
 
 from fastapi import HTTPException
-from sqlalchemy import delete, func
+from sqlalchemy import delete
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 

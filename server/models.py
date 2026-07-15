@@ -1,7 +1,6 @@
 from typing import Optional, List, Dict, Any
 from sqlmodel import Field, SQLModel, JSON, Column
 from sqlalchemy import Index, UniqueConstraint
-from pydantic import BaseModel
 import datetime
 
 from server.time_utils import utc_now
