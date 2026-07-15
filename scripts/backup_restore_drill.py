@@ -9,8 +9,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from server.backup import export_database_json, import_database_json
-from server.models import DEFAULT_TENANT_ID, Tenant, User
+from server.backup import export_database_json, import_database_json  # noqa: E402
+from server.models import DEFAULT_TENANT_ID, Tenant, User  # noqa: E402
 
 
 def run_drill() -> dict:

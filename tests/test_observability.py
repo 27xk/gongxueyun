@@ -10,8 +10,6 @@ from sqlmodel import SQLModel, create_engine
 class ObservabilityTest(unittest.TestCase):
     def setUp(self):
         self.engine = create_engine("sqlite://")
-        from server.models import TaskExecutionEvent, TaskExecutionLock
-
         SQLModel.metadata.create_all(self.engine)
 
     def test_records_task_event_and_returns_metrics(self):
