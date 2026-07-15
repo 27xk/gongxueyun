@@ -11,6 +11,7 @@
 | 5xx 告警 | `/metrics.prom`、请求 ID、后端日志 | 数据库、迁移版本、配置校验、外部依赖失败 | 5xx 回落，请求 ID 可追溯 |
 | 批量任务卡住 | `/batch-jobs/{id}`、worker 日志 | running lease 未回收、远端限流、worker 停止 | queued / running / failed 状态恢复可解释 |
 | AI 生成失败 | 系统设置、`/settings/ai/test`、AI 安全配置 | Key 缺失、host 白名单、内网端点被拒、模型不在白名单 | 测试接口和正式生成链路均可解释 |
+| 支付宝验证异常 | 当次任务结果、继续接口响应、授权用户范围 | `304` 被误判、登记失败、深链无效、登记已过期 | 不误报成功，用户可完成验证或获得明确失败 |
 | 权限异常 | 当前用户权限、`ROLE_PERMISSIONS_JSON`、审计日志 | 灰度配置残留、角色权限映射错误 | 权限矩阵符合预期，灰度配置清理 |
 
 ## 供应链审计失败
@@ -22,6 +23,33 @@
 | GitHub Actions | `.github/workflows/docker-publish.yml` | 外部 action 的 `uses:` 必须钉到完整 40 位 commit SHA |
 | Docker 基础镜像 | `Dockerfile` | `FROM` 必须使用 `@sha256:` digest |
 | 策略结果 | CI 输出中的固定策略检查 | 修复 action 和基础镜像固定策略 |
+
+### Docker Publish 步骤顺序
+
+Docker Publish 只有一个主 Job，但镜像步骤位于全部质量门之后。排障时先定位第一个失败步骤，不要把所有失败都归因于 Docker。
+
+| 阶段 | 关键步骤 | 失败影响 |
+|------|----------|----------|
+| 后端准备 | 安装依赖、`pip-audit`、Alembic 迁移 | 后端测试和后续步骤不执行 |
+| 后端验证 | unittest、compileall、质量门、备份恢复演练 | Node、Trivy 和 Docker 全部跳过 |
+| 前端验证 | `npm ci`、审计、lint、测试、构建 | Trivy 和 Docker 全部跳过 |
+| 文件系统扫描 | Trivy `CRITICAL,HIGH` | 镜像登录、构建和推送跳过 |
+| 镜像发布 | Buildx、登录、metadata、build and push | 签名和验签跳过 |
+| 供应链证明 | cosign 签名、GHCR 签名验证 | Job 失败，不应视为完整发布 |
+
+GitHub Job 元数据中的 `skipped` 表示前置步骤已经失败，不代表被跳过的 Docker 步骤本身存在错误。后端测试失败时，应先获取失败断言或在与 CI 相同的 Python 和依赖版本中复现。
+
+### OpenAPI 契约失败
+
+`tests/test_openapi_contract.py` 比较运行时生成结果和 `docs/api/openapi-contract.json`。FastAPI 版本不同可能改变框架内置的验证错误 schema，因此不能使用全局旧环境生成快照。
+
+```powershell
+python -m pip install -r server/requirements.txt
+python scripts/openapi_contract.py --write
+python -m unittest discover -s tests -p "test_openapi_contract.py" -v
+```
+
+提交前检查快照差异，只应包含本次路由或模型变更，以及当前固定依赖确定生成的框架字段。不要为了让测试通过手工删除未知字段。
 
 ## 认证失败告警
 
@@ -75,6 +103,33 @@
 | 回放对比 | `AI_PROMPT_VERSION` 一致 |
 
 正式 AI 生成默认拒绝本机、内网、链路本地和特殊地址，并会固定已校验 DNS 解析结果，避免校验后解析漂移。
+
+## 支付宝安全验证异常
+
+| 现象 | 判断 | 处理 |
+|------|------|------|
+| 打卡响应 `msg == "304"` 却显示成功 | 业务响应被错误归类 | 检查 `ApiClient` 是否返回 `verification_required`，任务层是否映射为失败 |
+| 页面没有验证入口 | 登记接口失败、返回字段缺失或深链被拒 | 检查当次授权响应；不得把完整 `registerUrl` 写入日志 |
+| 深链无法打开 | 协议不是 `alipays://` 或客户端未安装支付宝 | 后端应拒绝非支付宝协议，前端不得绕过协议检查 |
+| 点击继续后再次要求验证 | 登记过期或远端要求重新登记 | 使用后端返回的新登记信息，不自动循环重试 |
+| 继续接口返回 400 | `out_register_no` 或 `target_type` 格式错误 | 使用当次页面内存中的登记编号；类型只允许 `START` / `END` |
+| 用户端返回 401 / 404 | 登录态失效、未绑定用户或租户不匹配 | 重新登录并检查绑定关系，不改用管理端接口绕过 |
+| 管理端返回 403 / 404 | 缺少 `tasks:run` 权限或目标用户不在当前租户 | 修正权限或用户范围 |
+
+验证资料只允许出现在当次授权 HTTP 响应和页面内存。审计详情、数据库中的最近执行结果、Server 酱和邮件通知均不得包含 `outRegisterNo` 或 `registerUrl`。
+
+## GHCR 镜像验签
+
+Docker Publish 使用 GitHub OIDC 为 GHCR digest 执行无密钥签名。部署指定 digest 前可运行：
+
+```bash
+cosign verify \
+  --certificate-identity-regexp "https://github.com/27xk/gongxueyun/.github/workflows/docker-publish.yml@refs/.*" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  "ghcr.io/27xk/gongxueyun@sha256:<digest>"
+```
+
+验签必须同时满足仓库工作流身份和 GitHub Actions OIDC issuer。只有镜像能拉取但验签失败时，应检查 digest、工作流身份、签名步骤和发布 Run，不要改为跳过验签。
 
 ## 权限灰度
 
