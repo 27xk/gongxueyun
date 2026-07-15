@@ -1,6 +1,6 @@
 # AutoMoGuDing SaaS（工学云自动化打卡平台）
 
-AutoMoGuDing SaaS 是一个自托管的工学云自动化平台，提供管理端和用户端两套 Web 界面，覆盖自动打卡、支付宝安全验证后继续打卡、缺卡筛选、手动补卡、日报 / 周报 / 月报提交、批量执行、AI 报告生成和运行观测。
+AutoMoGuDing SaaS 是一个自托管的工学云自动化平台，提供管理端和用户端两套 Web 界面，覆盖自动打卡、未来日期预授权、支付宝安全验证后继续打卡、缺卡筛选、手动补卡、日报 / 周报 / 月报提交、批量执行、AI 报告生成和运行观测。
 适合个人、班级和小团队统一托管工学云打卡与报告任务。
 
 ## 项目速览
@@ -10,7 +10,7 @@ AutoMoGuDing SaaS 是一个自托管的工学云自动化平台，提供管理�
 | 产品形态 | 自托管 Web 平台 |
 | 后端 | FastAPI + SQLModel + MySQL + Alembic + APScheduler |
 | 前端 | Vue 3 + Vite + Pinia + Vue Router + Element Plus |
-| 入口 | 管理端 `/login`；用户端 `/u/login`、`/u/register`、`/u`、`/u/settings` |
+| 入口 | 管理端 `/login`；用户端 `/u/login`、`/u/register`、`/u`、`/u/settings`、`/u/preauthorizations` |
 | 数据库 | 仅支持 MySQL，连接串必须使用 `mysql+pymysql://` |
 | 调度模型 | `app` 提供 Web / API，`worker` 运行定时任务和批量队列 |
 | 安全基线 | HttpOnly Cookie、CSRF、CSP、HSTS、权限点、限流、审计、敏感字段加密 |
@@ -58,6 +58,7 @@ AutoMoGuDing SaaS 是一个自托管的工学云自动化平台，提供管理�
 | 登录认证 | 管理员登录、角色权限、权限点校验 | 注册 / 登录、绑定工学云账号 | `server/auth.py`、`server/api.py` |
 | 用户管理 | 新增、编辑、软删除、重置状态 | 读取和保存自身配置 | `server/models.py`、`server/user_runtime.py` |
 | 自动打卡 | 为用户配置打卡时间、地点、周期；处理安全验证 | 自助维护个人配置；验证后显式继续打卡 | `server/scheduler.py`、`server/task_runner.py` |
+| 打卡预授权 | 代用户按日期完成上班、下班或补卡预授权 | 按日期逐项完成预授权 | `server/clockin_preauthorization.py` |
 | 缺卡筛选 | 查询指定用户缺卡日期 | 查询当前用户缺卡日期 | `server/clockin_backfill.py` |
 | 手动补卡 | 为指定用户补选中或补全部 | 自助补选中或补全部 | `server/task_runner.py`、`server/coreApi/MainLogicApi.py` |
 | 报告补交 | 日报 / 周报 / 月报生成与补交 | 日报 / 周报 / 月报生成与补交 | `server/task_runner.py`、`server/coreApi/AiServiceClient.py` |
@@ -78,6 +79,8 @@ AutoMoGuDing SaaS 是一个自托管的工学云自动化平台，提供管理�
 | 用户端注册 | `/u/register` | 受 `APP_REGISTRATION_ENABLED` 控制，生产默认关闭 |
 | 用户工作台 | `/u` | 手动执行、执行记录、日报快捷入口 |
 | 用户设置 | `/u/settings` | 打卡、报告、补卡、推送配置 |
+| 用户预授权 | `/u/preauthorizations` | 今天及未来上 / 下班预授权、过去日期补卡预授权 |
+| 管理端用户预授权 | `/users/{id}/preauthorizations` | 需要 `tasks:run` 权限，可从用户列表或编辑页进入 |
 | API 文档 | `/docs` | 生产默认关闭，需 `EXPOSE_API_DOCS=true` |
 | OpenAPI | `/openapi.json` | 生产默认关闭，契约快照见 `docs/api/openapi-contract.json` |
 | Prometheus 指标 | `/metrics.prom` | 生产需要 `METRICS_AUTH_TOKEN` |
@@ -96,18 +99,22 @@ AutoMoGuDing SaaS 是一个自托管的工学云自动化平台，提供管理�
 | 频繁请求 | 命中 `429`、`rate limit` 或 IP 限制时等待重试 | 当前日期成功后进入冷却降速；持续失败则停止剩余日期 |
 | 代理 | 只在手动补卡执行阶段启用 | 登录、缺卡查询、定时打卡、报告提交不使用补卡代理 |
 
-### 支付宝安全验证
+### 打卡预授权与支付宝安全验证
 
-工学云打卡接口可能返回 HTTP 200、业务 `code == 200`，同时 `msg == "304"`。该响应表示需要支付宝安全验证，不代表打卡成功。
+工学云打卡接口可能返回 HTTP 200、业务 `code == 200`，同时 `msg == "304"`。该响应表示需要支付宝安全验证，不代表打卡成功。预授权用于提前完成这次验证；即时验证仍作为没有可用预授权时的兜底流程。
 
-| 阶段 | 系统行为 | 用户行为 |
+| 阶段 | 系统行为 | 关键规则 |
 |------|----------|----------|
-| 首次触发 `304` | 创建支付宝验证登记，返回 `outRegisterNo` 和经过协议校验的 `registerUrl` | 在当前页面打开支付宝完成验证 |
-| 等待验证 | 不自动重试打卡，不把任务记录为成功 | 完成验证后点击「验证完成，继续打卡」 |
-| 显式继续 | 携带 `outRegisterNo` 只提交 1 次打卡 | 等待成功或新的验证提示 |
-| 再次触发 `304` | 创建新登记并替换页面内存中的验证信息 | 使用新链接再次验证 |
+| 生成列表 | 从用户添加日生成到 `planInfo.endTime`，只保留配置星期 | 今天及未来每天有 `START`、`END` 两项；过去日期每天只有 1 项 `MAKEUP` |
+| 发起预授权 | 调用工学云登记接口，返回签名票据、支付宝深链和浏览器链接 | 此时不写数据库；签名票据有效期为 30 分钟 |
+| 打开支付宝 | 可直接打开 `alipays://`，也可打开 `https://ds.alipay.com/?scheme=...` | 回调页包含动态替换后的账号和北京时间 |
+| 用户确认 | 点击「我已完成授权」后提交签名票据 | 仅此时明文保存 `outRegisterNo`；`registerUrl` 和签名票据不持久化 |
+| 正常打卡 | 首次请求始终不带预授权凭据 | 未触发 `304` 时完全不读取、不消费预授权 |
+| 首次触发 `304` | 原子占用匹配日期和类型的凭据，携带 `outRegisterNo` 重试 1 次 | 同一凭据只能由一个定时或手动任务取得 |
+| 重试仍为 `304` | 标记为「需重新授权」并停止 | 不发起第 3 次请求 |
+| 没有可用预授权 | 创建即时验证登记并等待用户显式继续 | 不自动重试，不误报成功 |
 
-用户端调用 `POST /api/app/clock-in/alipay/continue`，管理端调用 `POST /api/users/{user_id}/clock-in/alipay/continue`。登记编号和深链不写入审计日志、持久化执行结果或消息通知。补卡流程不会进入该继续接口。
+过去日期的 `MAKEUP` 可用于当日上班或下班补卡，但每天只能成功占用 1 次。即时验证由用户端 `POST /api/app/clock-in/alipay/continue` 或管理端 `POST /api/users/{user_id}/clock-in/alipay/continue` 显式继续。登记编号和 URL 均不进入日志、审计详情、通知、执行历史或预授权列表响应。
 
 ### 报告补交
 
@@ -226,4 +233,5 @@ $env:APP_IMAGE = 'ghcr.io/27xk/gongxueyun:latest'
 | 前后端联调失败 | 前端地址、后端地址、`VITE_API_PROXY_TARGET`、请求路径、状态码 |
 | 数据库错误 | `DATABASE_URL` 脱敏后主机信息、Alembic 版本、完整 SQL 错误 |
 | 补卡失败 | 用户配置、目标日期、`target_type`、工学云返回、代理切换次数 |
+| 预授权异常 | 用户 ID、目标日期和类型、列表状态、接口状态码；不要提供登记编号或完整 URL |
 | 报告失败 | 报告类型、周期、AI 设置、`AI_ALLOWED_HOSTS`、后端任务日志 |
