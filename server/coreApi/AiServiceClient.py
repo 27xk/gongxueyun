@@ -336,7 +336,7 @@ def generate_article(
                 return None
             return choices[0].get("message", {}).get("content",
                                                      "").strip() or None
-        except Exception as e:
+        except Exception:
             logger.exception("解析响应发生异常")
             return None
 

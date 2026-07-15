@@ -2,7 +2,6 @@ import logging
 import os
 import json
 import random
-import threading
 import time
 from datetime import datetime, timedelta, time as datetime_time
 from typing import Dict, List, Optional, Any, Callable
@@ -26,7 +25,6 @@ from server.user_runtime import (
     build_effective_push_notifications,
     normalize_smtp_settings,
     runtime_login_valid,
-    runtime_plan_required,
 )
 from server.util.HelperFunctions import desensitize_name, is_holiday
 from server.util.FileUploader import upload_img

@@ -18,7 +18,6 @@ from server.util.Config import ConfigManager
 from server.util.CryptoUtils import create_sign, aes_encrypt, aes_decrypt
 from server.util.CaptchaUtils import recognize_blockPuzzle_captcha, recognize_clickWord_captcha
 from server.util.HelperFunctions import get_current_month_info
-from server.util.LoggerContext import _log_ctx
 from server.proxy_settings import load_global_proxy_settings
 
 logger = logging.getLogger(__name__)
