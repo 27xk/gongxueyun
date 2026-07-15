@@ -1,4 +1,5 @@
 import argparse
+from importlib import metadata as importlib_metadata
 import json
 import sys
 from pathlib import Path
@@ -11,6 +12,40 @@ if str(ROOT) not in sys.path:
 
 
 SNAPSHOT_PATH = ROOT / "docs" / "api" / "openapi-contract.json"
+SCHEMA_DEPENDENCY_PACKAGES = ("fastapi", "starlette", "sqlmodel")
+
+
+def _required_schema_dependency_versions() -> dict[str, str]:
+    requirements_path = ROOT / "server" / "requirements.txt"
+    pinned: dict[str, str] = {}
+    for raw_line in requirements_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        for package in SCHEMA_DEPENDENCY_PACKAGES:
+            prefix = f"{package}=="
+            if line.lower().startswith(prefix):
+                pinned[package] = line[len(prefix) :].strip()
+    missing = [package for package in SCHEMA_DEPENDENCY_PACKAGES if package not in pinned]
+    if missing:
+        raise RuntimeError(
+            "OpenAPI schema dependencies must be exactly pinned: "
+            + ", ".join(missing)
+        )
+    return pinned
+
+
+def require_contract_generator_environment() -> None:
+    required = _required_schema_dependency_versions()
+    mismatches = [
+        f"{package}=={expected} (installed {importlib_metadata.version(package)})"
+        for package, expected in required.items()
+        if importlib_metadata.version(package) != expected
+    ]
+    if mismatches:
+        raise RuntimeError(
+            "OpenAPI contract generation requires pinned dependencies: "
+            + ", ".join(mismatches)
+            + ". Run: python -m pip install -r server/requirements.txt"
+        )
 
 
 def _sorted_dict(value: dict[str, Any]) -> dict[str, Any]:
@@ -125,6 +160,7 @@ def main() -> int:
     parser.add_argument("--write", action="store_true", help="Write docs/api/openapi-contract.json")
     args = parser.parse_args()
 
+    require_contract_generator_environment()
     from server.main import app
 
     contract = build_openapi_contract(app.openapi())

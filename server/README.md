@@ -362,4 +362,4 @@ Docker Publish 在构建镜像前执行以下后端步骤：
 6. `python scripts/quality_gate.py`
 7. `python scripts/backup_restore_drill.py`
 
-修改 FastAPI 路由、请求模型或响应模型后，使用与 `server/requirements.txt` 一致的依赖运行 `python scripts/openapi_contract.py --write`，并提交 `docs/api/openapi-contract.json`。直接使用不同 FastAPI 版本生成快照可能造成 CI 契约测试失败。
+修改 FastAPI 路由、请求模型或响应模型后，使用与 `server/requirements.txt` 一致的依赖运行 `python scripts/openapi_contract.py --write`，并提交 `docs/api/openapi-contract.json`。契约脚本会校验 FastAPI、Starlette 和 SQLModel 的固定版本；版本不一致时会拒绝检查或覆盖快照，请先运行 `python -m pip install -r server/requirements.txt`。
