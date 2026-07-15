@@ -56,6 +56,28 @@ class FrontendClockInPreauthorizationTest(unittest.TestCase):
         self.assertIn("ClockInPreauthorizationPage", user_source)
         self.assertIn("ClockInPreauthorizationPage", admin_source)
 
+    def test_routes_and_navigation_expose_both_preauthorization_pages(self):
+        router_source = read("web/src/router/index.js")
+        user_layout_source = read("web/src/views/user/UserLayout.vue")
+
+        self.assertIn("path: '/u/preauthorizations'", router_source)
+        self.assertIn("path: '/users/:id/preauthorizations'", router_source)
+        self.assertIn("permissions: ['tasks:run']", router_source)
+        self.assertIn("预授权", user_layout_source)
+        self.assertIn("/u/preauthorizations", user_layout_source)
+
+    def test_admin_user_pages_have_authorized_desktop_and_mobile_entries(self):
+        user_list_source = read("web/src/views/UserList.vue")
+        user_edit_source = read("web/src/views/UserEdit.vue")
+
+        self.assertIn("goPreauthorization", user_list_source)
+        self.assertIn('command="preauthorization"', user_list_source)
+        self.assertIn("canRun", user_list_source)
+        self.assertIn("`/users/${id}/preauthorizations`", user_list_source)
+        self.assertIn("goPreauthorization", user_edit_source)
+        self.assertIn("v-if=\"isEdit && canRun\"", user_edit_source)
+        self.assertIn("`/users/${route.params.id}/preauthorizations`", user_edit_source)
+
 
 if __name__ == "__main__":
     unittest.main()

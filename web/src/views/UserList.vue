@@ -98,6 +98,7 @@
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item :disabled="!canWrite" command="edit">编辑</el-dropdown-item>
+                  <el-dropdown-item :disabled="!canRun" command="preauthorization">预授权</el-dropdown-item>
                   <el-dropdown-item :disabled="!canWrite" command="remark">备注</el-dropdown-item>
                   <el-dropdown-item divided :disabled="!canDelete" command="delete">删除</el-dropdown-item>
                 </el-dropdown-menu>
@@ -146,10 +147,11 @@
             <el-tag :type="scope.row.enable_clockin ? 'success' : 'info'">{{ scope.row.enable_clockin ? '是' : '否' }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="320">
+        <el-table-column label="操作" width="400">
           <template #default="scope">
             <div class="desktop-actions-row">
               <el-button v-if="canWrite" size="small" @click="goEditUser(scope.row.id)">编辑</el-button>
+              <el-button v-if="canRun" size="small" type="primary" plain @click="goPreauthorization(scope.row.id)">预授权</el-button>
               <el-button v-if="canWrite" size="small" type="success" @click="runTask(scope.row.id)" :loading="scope.row.running">立即运行</el-button>
               <el-button v-if="canWrite" size="small" type="warning" @click="openRemark(scope.row)">备注</el-button>
               <el-button size="small" type="info" @click="showLogs(scope.row)">日志</el-button>
@@ -346,6 +348,7 @@ const router = useRouter()
 const auth = useAuthStore()
 const canWrite = computed(() => auth.canWrite)
 const canDelete = computed(() => auth.isAdmin)
+const canRun = computed(() => auth.can('tasks:run'))
 let usersAbort = null
 let jobAbort = null
 
@@ -456,6 +459,11 @@ const goEditUser = (id) => {
   router.push(`/edit/${id}`)
 }
 
+const goPreauthorization = (id) => {
+  showInfo('正在打开预授权页面')
+  router.push(`/users/${id}/preauthorizations`)
+}
+
 const onMobileCommand = (cmd, user) => {
   if (!user) return
   if (cmd === 'edit') {
@@ -466,6 +474,11 @@ const onMobileCommand = (cmd, user) => {
   if (cmd === 'remark') {
     if (!canWrite.value) return
     openRemark(user)
+    return
+  }
+  if (cmd === 'preauthorization') {
+    if (!canRun.value) return
+    goPreauthorization(user.id)
     return
   }
   if (cmd === 'delete') {
