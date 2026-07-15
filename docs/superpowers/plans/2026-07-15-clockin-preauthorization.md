@@ -326,7 +326,7 @@ git commit -m "feat(打卡): 实现预授权凭据生命周期"
 - 修改：`tests/test_runtime_and_report_force.py`
 - 修改：`tests/test_task_runner_makeup_delay.py`
 
-- [ ] **步骤 1：编写首次无凭据、`304` 后单次重试失败测试**
+- [x] **步骤 1：编写首次无凭据、`304` 后单次重试失败测试**
 
 在 `tests/test_alipay_clockin_verification.py` 增加：
 
@@ -344,17 +344,19 @@ def test_preauthorized_clockin_sends_token_only_after_initial_304(self):
 
 再覆盖：无预授权时创建即时登记；二次 `304` 标记重新授权且无第三次请求；显式继续不查询预授权；补卡用 `MAKEUP` 和目标日期；批量补卡逐日透传 Hook；执行结果不含凭据。
 
-- [ ] **步骤 2：运行测试确认失败**
+- [x] **步骤 2：运行测试确认失败**
 
 运行：
 
 ```powershell
-python -m dotenv -f "F:\code\szxm\automoguding-saas\.env" run -- python -m unittest tests.test_alipay_clockin_verification tests.test_runtime_and_report_force tests.test_task_runner_makeup_delay
+python -m dotenv -f "F:\code\szxm\automoguding-saas\.env" run -- python -m unittest discover -s tests -p "test_alipay_clockin_verification.py"
+python -m dotenv -f "F:\code\szxm\automoguding-saas\.env" run -- python -m unittest discover -s tests -p "test_runtime_and_report_force.py"
+python -m dotenv -f "F:\code\szxm\automoguding-saas\.env" run -- python -m unittest discover -s tests -p "test_task_runner_makeup_delay.py"
 ```
 
 预期：首次请求仍由底层客户端直接创建即时登记，Hook 参数不存在。
 
-- [ ] **步骤 3：解耦底层 `304`**
+- [x] **步骤 3：解耦底层 `304`**
 
 将 `_submit_clock_in_payload` 的 `304` 分支改为：
 
@@ -375,11 +377,11 @@ if response.get("msg") == "304":
 
 把 `registration_ticket`、`direct_url`、`browser_url` 加入 `SENSITIVE_EXECUTION_FIELDS`。
 
-- [ ] **步骤 4：运行打卡聚焦测试确认通过**
+- [x] **步骤 4：运行打卡聚焦测试确认通过**
 
 运行步骤 2 的命令，预期全部通过，并确认每个测试最多调用 2 次提交接口。
 
-- [ ] **步骤 5：提交任务联动**
+- [x] **步骤 5：提交任务联动**
 
 ```powershell
 git add server/coreApi/MainLogicApi.py server/task_runner.py server/user_runtime.py tests/test_alipay_clockin_verification.py tests/test_runtime_and_report_force.py tests/test_task_runner_makeup_delay.py

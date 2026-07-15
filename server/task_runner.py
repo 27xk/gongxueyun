@@ -108,9 +108,16 @@ def _safe_perform_clock_in_makeup(
     config: ConfigManager,
     target_date: str,
     target_type: Optional[str],
+    preauthorization_hooks: Any = None,
 ) -> Dict[str, Any]:
     try:
-        return perform_clock_in_makeup(api_client, config, target_date, target_type=target_type)
+        return perform_clock_in_makeup(
+            api_client,
+            config,
+            target_date,
+            target_type=target_type,
+            preauthorization_hooks=preauthorization_hooks,
+        )
     except Exception as exc:
         logger.error("补卡 %s 执行异常: %s", target_date, exc)
         return {
@@ -171,13 +178,20 @@ def _perform_clock_in_makeup_with_rate_limit_retry(
     target_type: Optional[str],
     retry_count: int,
     retry_seconds: float,
+    preauthorization_hooks: Any = None,
 ) -> tuple[Dict[str, Any], int, bool, int]:
     retries_used = 0
     retry_wait_total_seconds = 0.0
     rate_limited = False
     proxy_rotations = 0
     while True:
-        result = _safe_perform_clock_in_makeup(api_client, config, target_date, target_type=target_type)
+        result = _safe_perform_clock_in_makeup(
+            api_client,
+            config,
+            target_date,
+            target_type=target_type,
+            preauthorization_hooks=preauthorization_hooks,
+        )
         if not _is_clockin_rate_limited(result) or retries_used >= retry_count:
             return (
                 _with_makeup_retry_details(
@@ -293,6 +307,7 @@ def perform_clock_in(
     target_time: Optional[datetime] = None,
     replace: bool = False,
     out_register_no: Optional[str] = None,
+    preauthorization_hooks: Any = None,
 ) -> Dict[str, Any]:
     """执行打卡操作"""
     try:
@@ -400,10 +415,39 @@ def perform_clock_in(
         if out_register_no:
             checkin_info["outRegisterNo"] = out_register_no
 
-        if replace:
-            submit_result = api_client.submit_clock_in_replace(checkin_info)
-        else:
-            submit_result = api_client.submit_clock_in(checkin_info)
+        submit = (
+            api_client.submit_clock_in_replace
+            if replace
+            else api_client.submit_clock_in
+        )
+        submit_result = submit(checkin_info)
+        if (
+            isinstance(submit_result, dict)
+            and submit_result.get("status") == "verification_required"
+        ):
+            claim = None
+            if (
+                not out_register_no
+                and preauthorization_hooks is not None
+                and checkin_type in ("START", "END")
+            ):
+                claim = preauthorization_hooks.claim(
+                    target_date=current_time.date(),
+                    target_type="MAKEUP" if replace else checkin_type,
+                    used_target_type=checkin_type if replace else None,
+                )
+            if claim is not None:
+                retry_info = dict(checkin_info)
+                retry_info["outRegisterNo"] = claim.out_register_no
+                submit_result = submit(retry_info)
+                if not (
+                    isinstance(submit_result, dict)
+                    and submit_result.get("status") == "verification_required"
+                ):
+                    submit_result = {"status": "success"}
+                else:
+                    preauthorization_hooks.require_reauthorization(claim.id)
+
         if (
             isinstance(submit_result, dict)
             and submit_result.get("status") == "verification_required"
@@ -411,10 +455,11 @@ def perform_clock_in(
             details = {"target_type": checkin_type}
             message = "补卡触发支付宝安全验证，本次补卡未完成"
             if not replace:
+                registration = api_client.create_alipay_clockin_verification()
                 details.update(
                     {
-                        "outRegisterNo": submit_result.get("outRegisterNo"),
-                        "registerUrl": submit_result.get("registerUrl"),
+                        "outRegisterNo": registration.get("outRegisterNo"),
+                        "registerUrl": registration.get("registerUrl"),
                     }
                 )
                 message = "需要完成支付宝安全验证，请验证后继续打卡"
@@ -463,6 +508,7 @@ def perform_clock_in_makeup(
     config: ConfigManager,
     target_date: Optional[str],
     target_type: Optional[str] = None,
+    preauthorization_hooks: Any = None,
 ) -> Dict[str, Any]:
     day = parse_clockin_date(target_date)
     if not day:
@@ -504,6 +550,7 @@ def perform_clock_in_makeup(
                 forced_checkin_type=checkin_type,
                 target_time=target_time,
                 replace=True,
+                preauthorization_hooks=preauthorization_hooks,
             )
         )
 
@@ -554,6 +601,7 @@ def perform_clock_in_makeup_many(
     rate_limit_retries: Optional[int] = None,
     rate_limit_retry_seconds: Optional[float] = None,
     rate_limit_cooldown_seconds: Optional[float] = None,
+    preauthorization_hooks: Any = None,
 ) -> Dict[str, Any]:
     dates = _normalize_makeup_dates(target_dates)
     if not dates:
@@ -584,6 +632,7 @@ def perform_clock_in_makeup_many(
             target_type=target_type,
             retry_count=retry_count,
             retry_seconds=retry_seconds,
+            preauthorization_hooks=preauthorization_hooks,
         )
         rate_limit_retry_total += retries_used
         proxy_rotation_total += proxy_rotations
@@ -941,6 +990,7 @@ def run_task_by_config(
     specific_task_type: Optional[str] = None,
     force_report: bool = False,
     target_period: Optional[str] = None,
+    preauthorization_hooks: Any = None,
 ) -> List[Dict[str, Any]]:
     """根据配置字典执行任务"""
     config_data = _apply_global_ai_settings(config_data)
@@ -981,7 +1031,15 @@ def run_task_by_config(
         )
 
         default_tasks = [
-            ("clock_in", lambda: perform_clock_in(api_client, config, forced_checkin_type)),
+            (
+                "clock_in",
+                lambda: perform_clock_in(
+                    api_client,
+                    config,
+                    forced_checkin_type,
+                    preauthorization_hooks=preauthorization_hooks,
+                ),
+            ),
             ("daily_report", lambda: submit_daily_report(api_client, config, force_report=force_report, target_period=target_period)),
             ("weekly_report", lambda: submit_weekly_report(config, api_client, force_report=force_report, target_period=target_period)),
             ("monthly_report", lambda: submit_monthly_report(config, api_client, force_report=force_report, target_period=target_period)),
@@ -990,7 +1048,12 @@ def run_task_by_config(
         def run_clock_in_makeup():
             if hasattr(api_client, "enable_proxy"):
                 api_client.enable_proxy()
-            return perform_clock_in_makeup(api_client, config, target_period)
+            return perform_clock_in_makeup(
+                api_client,
+                config,
+                target_period,
+                preauthorization_hooks=preauthorization_hooks,
+            )
 
         manual_only_tasks = [
             ("clock_in_makeup", run_clock_in_makeup),

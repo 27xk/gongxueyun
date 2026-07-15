@@ -1027,8 +1027,7 @@ class ApiClient:
         if response.get("msg") == "302":
             raise ValueError("打卡失败，行为验证码未通过")
         if response.get("msg") == "304":
-            registration = self.create_alipay_clockin_verification()
-            return {"status": "verification_required", **registration}
+            return {"status": "verification_required"}
         return {"status": "success"}
 
     def submit_clock_in(self, checkin_info: Dict[str, Any]) -> Dict[str, str]:

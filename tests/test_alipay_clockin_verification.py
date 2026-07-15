@@ -77,6 +77,7 @@ def build_task_api_client(submit_result, *, replace=False):
     client = Mock()
     client.get_checkin_records.return_value = []
     client.get_upload_token.return_value = "test-upload-token"
+    client.create_alipay_clockin_verification.return_value = dict(SAFE_REGISTRATION)
     if replace:
         client.submit_clock_in_replace.return_value = submit_result
     else:
@@ -163,23 +164,20 @@ class AlipayApiClientTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "支付宝安全验证响应不完整"):
             client.create_alipay_clockin_verification()
 
-    def test_initial_304_creates_registration_without_retrying_clockin(self):
+    def test_initial_304_reports_verification_without_creating_registration(self):
         client = build_api_client()
         client._post_request = Mock(return_value={"code": 200, "msg": "304", "data": "verify"})
         client.create_alipay_clockin_verification = Mock(return_value=dict(SAFE_REGISTRATION))
 
         result = client.submit_clock_in(build_checkin_info())
 
-        self.assertEqual(
-            result,
-            {"status": "verification_required", **SAFE_REGISTRATION},
-        )
+        self.assertEqual(result, {"status": "verification_required"})
         client._post_request.assert_called_once()
-        client.create_alipay_clockin_verification.assert_called_once_with()
+        client.create_alipay_clockin_verification.assert_not_called()
         submitted_payload = client._post_request.call_args.args[2]
         self.assertIsNone(submitted_payload["outRegisterNo"])
 
-    def test_continue_304_refreshes_registration_without_retrying_clockin(self):
+    def test_continue_304_reports_verification_without_retrying_clockin(self):
         client = build_api_client()
         client._post_request = Mock(return_value={"code": 200, "msg": "304", "data": "verify"})
         refreshed_registration = {
@@ -194,16 +192,13 @@ class AlipayApiClientTest(unittest.TestCase):
 
         result = client.submit_clock_in(checkin_info)
 
-        self.assertEqual(
-            result,
-            {"status": "verification_required", **refreshed_registration},
-        )
+        self.assertEqual(result, {"status": "verification_required"})
         client._post_request.assert_called_once()
         self.assertEqual(
             client._post_request.call_args.args[2]["outRegisterNo"],
             SAFE_REGISTRATION["outRegisterNo"],
         )
-        client.create_alipay_clockin_verification.assert_called_once_with()
+        client.create_alipay_clockin_verification.assert_not_called()
 
     def test_behavior_captcha_still_retries_clockin_once(self):
         client = build_api_client()
@@ -261,6 +256,7 @@ class ClockInTaskResultTest(unittest.TestCase):
             SAFE_REGISTRATION["outRegisterNo"],
         )
         self.assertEqual(result["details"]["registerUrl"], SAFE_REGISTRATION["registerUrl"])
+        api_client.create_alipay_clockin_verification.assert_called_once_with()
 
     def test_replace_verification_is_not_reported_as_success_or_continuable(self):
         api_client = build_task_api_client(
@@ -298,6 +294,110 @@ class ClockInTaskResultTest(unittest.TestCase):
             submitted_checkin_info["outRegisterNo"],
             SAFE_REGISTRATION["outRegisterNo"],
         )
+
+    def test_preauthorized_clockin_sends_token_only_after_initial_304(self):
+        api_client = build_task_api_client({"status": "verification_required"})
+        api_client.submit_clock_in.side_effect = [
+            {"status": "verification_required"},
+            {"status": "success"},
+        ]
+        hooks = Mock()
+        hooks.claim.return_value = SimpleNamespace(id=17, out_register_no="stored-register-1")
+
+        with patch.object(task_runner, "upload_img", return_value=[]):
+            result = task_runner.perform_clock_in(
+                api_client,
+                build_task_config(),
+                forced_checkin_type="START",
+                target_time=task_runner.datetime(2026, 7, 16, 8, 30),
+                preauthorization_hooks=hooks,
+            )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(api_client.submit_clock_in.call_count, 2)
+        first_payload = api_client.submit_clock_in.call_args_list[0].args[0]
+        second_payload = api_client.submit_clock_in.call_args_list[1].args[0]
+        self.assertNotIn("outRegisterNo", first_payload)
+        self.assertEqual(second_payload["outRegisterNo"], "stored-register-1")
+        hooks.claim.assert_called_once_with(
+            target_date=task_runner.datetime(2026, 7, 16).date(),
+            target_type="START",
+            used_target_type=None,
+        )
+        hooks.require_reauthorization.assert_not_called()
+        api_client.create_alipay_clockin_verification.assert_not_called()
+
+    def test_preauthorized_second_304_marks_reauthorization_and_stops(self):
+        api_client = build_task_api_client({"status": "verification_required"})
+        api_client.submit_clock_in.side_effect = [
+            {"status": "verification_required"},
+            {"status": "verification_required"},
+        ]
+        hooks = Mock()
+        hooks.claim.return_value = SimpleNamespace(id=18, out_register_no="stored-register-2")
+
+        with patch.object(task_runner, "upload_img", return_value=[]):
+            result = task_runner.perform_clock_in(
+                api_client,
+                build_task_config(),
+                forced_checkin_type="END",
+                target_time=task_runner.datetime(2026, 7, 16, 18, 30),
+                preauthorization_hooks=hooks,
+            )
+
+        self.assertEqual(result["status"], "fail")
+        self.assertEqual(api_client.submit_clock_in.call_count, 2)
+        hooks.require_reauthorization.assert_called_once_with(18)
+        api_client.create_alipay_clockin_verification.assert_called_once_with()
+        self.assertEqual(result["details"]["outRegisterNo"], SAFE_REGISTRATION["outRegisterNo"])
+
+    def test_makeup_uses_shared_day_authorization_with_actual_type(self):
+        api_client = build_task_api_client(
+            {"status": "verification_required"},
+            replace=True,
+        )
+        api_client.submit_clock_in_replace.side_effect = [
+            {"status": "verification_required"},
+            {"status": "success"},
+        ]
+        hooks = Mock()
+        hooks.claim.return_value = SimpleNamespace(id=19, out_register_no="makeup-register-1")
+
+        with patch.object(task_runner, "upload_img", return_value=[]):
+            result = task_runner.perform_clock_in(
+                api_client,
+                build_task_config(),
+                forced_checkin_type="END",
+                target_time=task_runner.datetime(2026, 7, 14, 18, 30),
+                replace=True,
+                preauthorization_hooks=hooks,
+            )
+
+        self.assertEqual(result["status"], "success")
+        hooks.claim.assert_called_once_with(
+            target_date=task_runner.datetime(2026, 7, 14).date(),
+            target_type="MAKEUP",
+            used_target_type="END",
+        )
+        second_payload = api_client.submit_clock_in_replace.call_args_list[1].args[0]
+        self.assertEqual(second_payload["outRegisterNo"], "makeup-register-1")
+        api_client.create_alipay_clockin_verification.assert_not_called()
+
+    def test_explicit_continue_does_not_claim_preauthorization(self):
+        api_client = build_task_api_client({"status": "success"})
+        hooks = Mock()
+
+        with patch.object(task_runner, "upload_img", return_value=[]):
+            result = task_runner.perform_clock_in(
+                api_client,
+                build_task_config(),
+                forced_checkin_type="START",
+                out_register_no=SAFE_REGISTRATION["outRegisterNo"],
+                preauthorization_hooks=hooks,
+            )
+
+        self.assertEqual(result["status"], "success")
+        hooks.claim.assert_not_called()
 
 
 class FakeRequest:
