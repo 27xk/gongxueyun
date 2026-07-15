@@ -1,6 +1,6 @@
 # AutoMoGuDing SaaS（工学云自动化打卡平台）
 
-AutoMoGuDing SaaS 是一个自托管的工学云自动化平台，提供管理端和用户端两套 Web 界面，覆盖自动打卡、缺卡筛选、手动补卡、日报 / 周报 / 月报提交、批量执行、AI 报告生成和运行观测。
+AutoMoGuDing SaaS 是一个自托管的工学云自动化平台，提供管理端和用户端两套 Web 界面，覆盖自动打卡、支付宝安全验证后继续打卡、缺卡筛选、手动补卡、日报 / 周报 / 月报提交、批量执行、AI 报告生成和运行观测。
 适合个人、班级和小团队统一托管工学云打卡与报告任务。
 
 ## 项目速览
@@ -57,7 +57,7 @@ AutoMoGuDing SaaS 是一个自托管的工学云自动化平台，提供管理�
 |------|--------|--------|--------------|
 | 登录认证 | 管理员登录、角色权限、权限点校验 | 注册 / 登录、绑定工学云账号 | `server/auth.py`、`server/api.py` |
 | 用户管理 | 新增、编辑、软删除、重置状态 | 读取和保存自身配置 | `server/models.py`、`server/user_runtime.py` |
-| 自动打卡 | 为用户配置打卡时间、地点、周期 | 自助维护个人打卡配置 | `server/scheduler.py`、`server/task_runner.py` |
+| 自动打卡 | 为用户配置打卡时间、地点、周期；处理安全验证 | 自助维护个人配置；验证后显式继续打卡 | `server/scheduler.py`、`server/task_runner.py` |
 | 缺卡筛选 | 查询指定用户缺卡日期 | 查询当前用户缺卡日期 | `server/clockin_backfill.py` |
 | 手动补卡 | 为指定用户补选中或补全部 | 自助补选中或补全部 | `server/task_runner.py`、`server/coreApi/MainLogicApi.py` |
 | 报告补交 | 日报 / 周报 / 月报生成与补交 | 日报 / 周报 / 月报生成与补交 | `server/task_runner.py`、`server/coreApi/AiServiceClient.py` |
@@ -72,6 +72,7 @@ AutoMoGuDing SaaS 是一个自托管的工学云自动化平台，提供管理�
 
 | 场景 | 地址 / 命令 | 说明 |
 |------|-------------|------|
+| 根地址 | `/` | 管理员会话进入管理端，用户会话进入 `/u`，未登录跳转 `/u/login` |
 | 管理端登录 | `/login` | 后台管理员入口 |
 | 用户端登录 | `/u/login` | 用户独立登录态，不复用管理端登录态 |
 | 用户端注册 | `/u/register` | 受 `APP_REGISTRATION_ENABLED` 控制，生产默认关闭 |
@@ -94,6 +95,19 @@ AutoMoGuDing SaaS 是一个自托管的工学云自动化平台，提供管理�
 | 全部待补 | 重新查询当前类型仍缺的日期后执行 | 不跨类型补卡 |
 | 频繁请求 | 命中 `429`、`rate limit` 或 IP 限制时等待重试 | 当前日期成功后进入冷却降速；持续失败则停止剩余日期 |
 | 代理 | 只在手动补卡执行阶段启用 | 登录、缺卡查询、定时打卡、报告提交不使用补卡代理 |
+
+### 支付宝安全验证
+
+工学云打卡接口可能返回 HTTP 200、业务 `code == 200`，同时 `msg == "304"`。该响应表示需要支付宝安全验证，不代表打卡成功。
+
+| 阶段 | 系统行为 | 用户行为 |
+|------|----------|----------|
+| 首次触发 `304` | 创建支付宝验证登记，返回 `outRegisterNo` 和经过协议校验的 `registerUrl` | 在当前页面打开支付宝完成验证 |
+| 等待验证 | 不自动重试打卡，不把任务记录为成功 | 完成验证后点击「验证完成，继续打卡」 |
+| 显式继续 | 携带 `outRegisterNo` 只提交 1 次打卡 | 等待成功或新的验证提示 |
+| 再次触发 `304` | 创建新登记并替换页面内存中的验证信息 | 使用新链接再次验证 |
+
+用户端调用 `POST /api/app/clock-in/alipay/continue`，管理端调用 `POST /api/users/{user_id}/clock-in/alipay/continue`。登记编号和深链不写入审计日志、持久化执行结果或消息通知。补卡流程不会进入该继续接口。
 
 ### 报告补交
 
@@ -144,13 +158,39 @@ npm run dev
 | 方式 | 命令 | 适用场景 |
 |------|------|----------|
 | 源码构建 | `docker compose up -d --build` | 本机或服务器直接从源码构建 |
+| 预构建镜像 | `docker compose -f docker-compose.image.yml up -d` | 使用 `APP_IMAGE` 指定的 GHCR 或 Docker Hub 镜像 |
 
-`docker-compose.yml` 默认启动两个服务：
+两套 Compose 均启动两个应用服务；它们不内置 MySQL，必须通过 `DATABASE_URL` 连接可用的 MySQL 8 实例：
 
 | 服务 | `APP_ROLE` | 职责 |
 |------|------------|------|
 | `app` | `api` | Web / API，不运行定时任务和批量队列 |
 | `worker` | `worker` | APScheduler 定时任务和批量任务队列 |
+
+预构建镜像默认使用 `ghcr.io/27xk/gongxueyun:latest`。如需检查并拉取指定镜像更新，可在 Windows PowerShell 中运行：
+
+```powershell
+$env:APP_IMAGE = 'ghcr.io/27xk/gongxueyun:latest'
+./scripts/check-image-update.ps1
+```
+
+脚本退出码 `10` 表示检测到新镜像并已拉取，退出码 `0` 表示当前镜像没有变化。
+
+## 验证命令
+
+| 范围 | 命令 |
+|------|------|
+| 后端测试 | `python -m unittest discover -s tests` |
+| 后端编译 | `python -m compileall server` |
+| OpenAPI 契约 | `python scripts/openapi_contract.py` |
+| 后端质量门 | `python scripts/quality_gate.py` |
+| 供应链策略 | `python scripts/verify_supply_chain_policy.py` |
+| 备份恢复演练 | `python scripts/backup_restore_drill.py` |
+| Python 依赖审计 | `pip-audit -r server/requirements.txt` |
+| 前端安装 | `cd web && npm ci` |
+| 前端审计 | `cd web && npm audit --audit-level=high` |
+| 前端检查 | `cd web && npm run lint && npm test` |
+| 前端构建 | `cd web && npm run build` |
 
 ## 目录结构
 

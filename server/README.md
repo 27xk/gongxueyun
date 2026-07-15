@@ -1,6 +1,6 @@
 # AutoMoGuDing SaaS 后端
 
-`server/` 是 AutoMoGuDing SaaS 的 FastAPI 后端，负责管理端 API、用户端 API、工学云接口调用、定时调度、批量任务队列、补卡、报告提交、审计、指标和运行时数据回写。
+`server/` 是 AutoMoGuDing SaaS 的 FastAPI 后端，负责管理端 API、用户端 API、工学云接口调用、支付宝安全验证后继续打卡、定时调度、批量任务队列、补卡、报告提交、审计、指标和运行时数据回写。
 
 ## 后端速览
 
@@ -183,6 +183,7 @@ python -m alembic upgrade head
 | 系统设置 | `/settings/*` | AI、SMTP、工学云代理等全局设置 |
 | 地理编码 | `/geocode/search`、`/geocode/reverse` | 地址搜索和逆地理 |
 | 补卡 | `/users/{user_id}/clock-in/*` | 缺卡查询、补选中、补全部 |
+| 验证后继续打卡 | `/users/{user_id}/clock-in/alipay/continue` | 携带登记编号显式继续 1 次打卡 |
 | 报告 | `/users/{user_id}/reports/*` | 生成、提交、补全部 |
 | 指标 | `/metrics`、`/metrics.prom` | 运行统计和 Prometheus 文本 |
 
@@ -199,12 +200,28 @@ python -m alembic upgrade head
 | 缺卡查询 | `/app/clock-in/missing-days` | 当前用户缺卡日期 |
 | 补选中 | `/app/clock-in/makeup` | 当前用户选中日期补卡 |
 | 补全部 | `/app/clock-in/makeup-all` | 当前类型全部待补日期 |
+| 验证后继续打卡 | `/app/clock-in/alipay/continue` | 当前绑定用户显式继续 1 次打卡 |
 | 报告周期 | `/app/reports/{report_key}/missing-periods` | 查询日报 / 周报 / 月报未提交周期 |
 | 报告生成 | `/app/reports/{report_key}/generate` | AI 生成内容 |
 | 报告提交 | `/app/reports/{report_key}/submit` | 提交报告 |
 | 报告补全部 | `/app/reports/{report_key}/makeup-all` | 补当前报告类型的全部待补周期 |
 
 管理端创建的用户如果没有单独写入 `app_password_hash`，用户端登录会使用该用户保存的工学云账号密码作为默认登录凭据，并在首次登录时自动生成绑定的 `AppUser`。自助注册用户仍使用独立的用户端账号，绑定工学云账号后才能执行打卡和报告任务。
+
+## 支付宝安全验证链路
+
+工学云打卡响应中的 `msg == "304"` 是业务验证状态。`ApiClient` 将其归一化为 `verification_required`，任务层返回可识别的失败结果，禁止把该响应记为成功。
+
+| 阶段 | 模块 | 行为 |
+|------|------|------|
+| 识别 `304` | `server/coreApi/MainLogicApi.py` | 创建支付宝登记，校验 `outRegisterNo` 和 `alipays://` 深链，不自动重试打卡 |
+| 任务映射 | `server/task_runner.py` | 普通打卡返回验证详情；补卡只返回失败，不提供继续入口 |
+| 用户端继续 | `server/api.py` | 校验绑定用户、限流、登记编号和 `START` / `END` 后提交 1 次 |
+| 管理端继续 | `server/api.py` | 校验 `tasks:run` 权限、租户、限流和请求参数后提交 1 次 |
+| 再次验证 | `server/coreApi/MainLogicApi.py` | 如果继续响应仍为 `304`，创建新登记并返回 |
+| 脱敏 | `server/user_runtime.py`、`server/util/MessagePush.py` | 不持久化、不审计、不推送登记编号和深链 |
+
+继续请求模型包含必填 `out_register_no` 和默认值为 `START` 的 `target_type`。登记编号只允许字母、数字和连字符，长度不超过 128；打卡类型只允许 `START` 或 `END`。
 
 ## 补卡执行链路
 
@@ -277,3 +294,17 @@ MOGUDING_PROXY_API_URL=http://capi.51daili.com/traffic/getip?linePoolIndex=1&pac
 | 加密导入 | `python -m server.backup_cli import backup.json --encryption-key <key>` |
 
 导出包包含 manifest 和表校验和，导入前会校验完整性。生产环境导出默认要求 `BACKUP_ENCRYPTION_KEY` 或 `--encryption-key`；只有显式设置 `ALLOW_PLAINTEXT_BACKUP=true` 才允许明文导出。
+
+## CI 后端门禁
+
+Docker Publish 在构建镜像前执行以下后端步骤：
+
+1. `python scripts/verify_supply_chain_policy.py`
+2. `pip-audit -r server/requirements.txt`
+3. `python -m alembic upgrade head`
+4. `python -m unittest discover -s tests`
+5. `python -m compileall server`
+6. `python scripts/quality_gate.py`
+7. `python scripts/backup_restore_drill.py`
+
+修改 FastAPI 路由、请求模型或响应模型后，使用与 `server/requirements.txt` 一致的依赖运行 `python scripts/openapi_contract.py --write`，并提交 `docs/api/openapi-contract.json`。直接使用不同 FastAPI 版本生成快照可能造成 CI 契约测试失败。
