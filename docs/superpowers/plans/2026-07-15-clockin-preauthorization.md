@@ -155,7 +155,7 @@ git commit -m "feat(打卡): 添加预授权数据模型"
 - 修改：`server/auth.py`
 - 修改：`tests/test_clockin_preauthorization.py`
 
-- [ ] **步骤 1：编写纯领域失败测试**
+- [x] **步骤 1：编写纯领域失败测试**
 
 覆盖以下输入输出：
 
@@ -199,17 +199,17 @@ def test_build_open_urls_replaces_nested_callback(self):
 
 票据测试使用固定 `APP_SECRET`，验证 30 分钟过期、篡改、用途、租户、用户、日期和类型。
 
-- [ ] **步骤 2：运行测试确认失败**
+- [x] **步骤 2：运行测试确认失败**
 
 运行：
 
 ```powershell
-python -m dotenv -f "F:\code\szxm\automoguding-saas\.env" run -- python -m unittest tests.test_clockin_preauthorization
+python -m dotenv -f "F:\code\szxm\automoguding-saas\.env" run -- python -m unittest discover -s tests -p "test_clockin_preauthorization.py"
 ```
 
 预期：领域函数尚不存在。
 
-- [ ] **步骤 3：实现最少领域代码**
+- [x] **步骤 3：实现最少领域代码**
 
 在 `server/auth.py` 为内部调用增加受控附加声明：
 
@@ -236,11 +236,11 @@ def verify_registration_ticket(ticket: str, *, tenant_id: str, user_id: int) -> 
 
 URL 实现必须使用 `urlsplit`、`parse_qsl`、`urlencode`、`urlunsplit`，拒绝非 `alipays://` URL，并保证最终只有一个 `thirdPartSchema`。
 
-- [ ] **步骤 4：运行领域测试确认通过**
+- [x] **步骤 4：运行领域测试确认通过**
 
 运行聚焦测试，预期全部通过。
 
-- [ ] **步骤 5：提交领域规则**
+- [x] **步骤 5：提交领域规则**
 
 ```powershell
 git add server/auth.py server/clockin_preauthorization.py tests/test_clockin_preauthorization.py
