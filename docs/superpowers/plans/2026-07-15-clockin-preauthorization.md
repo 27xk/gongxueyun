@@ -700,7 +700,7 @@ npm run build
 
 预期：审计无高危漏洞，质量门和构建通过。
 
-- [ ] **步骤 3：执行数据库与 Docker 验证**
+- [x] **步骤 3：执行数据库与 Docker 验证**
 
 在临时 MySQL 测试库执行：
 
@@ -717,6 +717,9 @@ docker build -t automoguding-saas:preauthorization-test .
 ```
 
 预期：迁移可升级、降级、再升级，Docker 镜像构建成功。
+
+远端验证：GitHub Actions `29443077542` 已通过 MySQL 迁移、334 项后端测试、
+前端审计与构建、Trivy 扫描、Docker Buildx 构建推送及 GHCR 镜像签名验签。
 
 - [x] **步骤 4：启动应用并检查桌面/移动页面**
 
