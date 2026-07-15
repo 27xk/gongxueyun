@@ -90,6 +90,38 @@ class SchedulerHardeningTest(unittest.TestCase):
 
         run_task.assert_not_called()
 
+    def test_run_clockin_job_injects_preauthorization_hooks(self):
+        from server.models import User
+        from server.scheduler import run_job
+
+        with Session(self.engine) as session:
+            user = User(
+                phone="13800000008",
+                password="encrypted",
+                enable_clockin=True,
+            )
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+            user_id = user.id
+
+        hooks = object()
+        with (
+            patch("server.scheduler.engine", self.engine),
+            patch("server.scheduler.acquire_task_lock", return_value=object()),
+            patch("server.scheduler.release_task_lock"),
+            patch("server.scheduler.record_task_event"),
+            patch("server.scheduler.build_preauthorization_hooks", return_value=hooks),
+            patch("server.scheduler.apply_execution_results_to_user"),
+            patch(
+                "server.scheduler.run_task_by_config",
+                return_value=[{"status": "success"}],
+            ) as run_task,
+        ):
+            run_job(user_id, "START")
+
+        self.assertIs(run_task.call_args.kwargs["preauthorization_hooks"], hooks)
+
 
 if __name__ == "__main__":
     unittest.main()

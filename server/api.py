@@ -3,10 +3,21 @@ from sqlmodel import Session, select
 from sqlalchemy import func
 from server.database import get_session, engine
 from server.batch_jobs import get_batch_job_item_status_counts
-from server.models import DEFAULT_TENANT_ID, User, UserCreate, UserRead, UserUpdate, UserListRead, AuditLog, BatchJob, BatchJobItem, AdminUser, AppUser, SystemSetting
+from server.models import DEFAULT_TENANT_ID, User, UserCreate, UserRead, UserUpdate, UserListRead, AuditLog, BatchJob, BatchJobItem, AdminUser, AppUser, SystemSetting, ClockInPreauthorization
 from server.scheduler import add_user_job, remove_user_job, user_to_config
 from server.task_runner import perform_clock_in, perform_clock_in_makeup, perform_clock_in_makeup_many, run_task_by_config
 from server.clockin_backfill import build_missing_clockin_day_options, normalize_clockin_records, parse_clockin_date
+from server.clockin_preauthorization import (
+    BEIJING_TZ,
+    REGISTRATION_TICKET_TTL_SECONDS,
+    build_alipay_open_urls,
+    build_preauthorization_hooks,
+    complete_preauthorization,
+    issue_registration_ticket,
+    list_preauthorizations,
+    parse_plan_end_date,
+    validate_preauthorization_target,
+)
 from server.util.Config import ConfigManager
 from server.coreApi.MainLogicApi import ApiClient
 from server.coreApi.AiServiceClient import generate_article, _ai_endpoint_detail, get_ai_prompt_version
@@ -501,6 +512,52 @@ class AlipayClockInContinueRequest(BaseModel):
     target_type: str = "START"
 
 
+class ClockInPreauthorizationStartRequest(BaseModel):
+    target_date: str
+    target_type: str
+
+
+class ClockInPreauthorizationCompleteRequest(BaseModel):
+    registration_ticket: str
+
+
+class ClockInPreauthorizationItemResponse(BaseModel):
+    id: Optional[int] = None
+    target_date: str
+    target_type: str
+    target_time: Optional[str] = None
+    status: str
+    authorized_at: Optional[str] = None
+    consumed_at: Optional[str] = None
+    used_target_type: Optional[str] = None
+    can_authorize: Optional[bool] = None
+
+
+class ClockInPreauthorizationListResponse(BaseModel):
+    account: str
+    added_date: str
+    plan_end_date: str
+    schedule: Dict[str, str]
+    scope: str
+    summary: Dict[str, int]
+    page: int
+    page_size: int
+    total: int
+    items: List[ClockInPreauthorizationItemResponse]
+
+
+class ClockInPreauthorizationStartResponse(BaseModel):
+    registration_ticket: str
+    direct_url: str
+    browser_url: str
+    started_at: str
+    expires_at: str
+
+
+class ClockInPreauthorizationCompleteResponse(BaseModel):
+    item: ClockInPreauthorizationItemResponse
+
+
 REPORT_META = {
     "daily": {
         "report_type": "day",
@@ -822,6 +879,159 @@ def _alipay_continue_values(req: AlipayClockInContinueRequest) -> tuple[str, str
     return out_register_no, target_type
 
 
+def _preauthorization_target_values(
+    req: ClockInPreauthorizationStartRequest,
+) -> tuple[datetime.date, str]:
+    try:
+        target_date = datetime.date.fromisoformat(str(req.target_date or "").strip())
+    except Exception:
+        raise ValueError("预授权日期格式错误")
+    target_type = str(req.target_type or "").strip().upper()
+    if target_type not in {"START", "END", "MAKEUP"}:
+        raise ValueError("预授权类型错误")
+    return target_date, target_type
+
+
+def _sync_preauthorization_plan(
+    user: User,
+    *,
+    force: bool,
+) -> tuple[ApiClient, Dict[str, Any]]:
+    config_data = user_to_config(user)
+    config = ConfigManager(config=config_data)
+    api_client = ApiClient(config)
+    if force:
+        if not runtime_login_valid(config.get_value("userInfo")):
+            api_client.login()
+        api_client.fetch_internship_plan()
+    else:
+        _ensure_remote_runtime(api_client, config)
+    sync_runtime_fields_to_user(user, config_data)
+    return api_client, config_data
+
+
+def _list_clockin_preauthorizations_for_user(
+    session: Session,
+    user: User,
+    *,
+    scope: str,
+    page: int,
+    page_size: int,
+    status: Optional[str],
+    target_type: Optional[str],
+    refresh_plan: bool,
+) -> Dict[str, Any]:
+    needs_plan = refresh_plan
+    if not needs_plan:
+        try:
+            parse_plan_end_date(user.planInfo)
+        except ValueError:
+            needs_plan = True
+    if needs_plan:
+        _sync_preauthorization_plan(user, force=True)
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+    return list_preauthorizations(
+        session,
+        user,
+        scope=scope,
+        page=page,
+        page_size=page_size,
+        status=status,
+        target_type=target_type,
+    )
+
+
+def _start_clockin_preauthorization_for_user(
+    user: User,
+    req: ClockInPreauthorizationStartRequest,
+    *,
+    session: Optional[Session] = None,
+) -> Dict[str, Any]:
+    target_date, target_type = _preauthorization_target_values(req)
+    try:
+        parse_plan_end_date(user.planInfo)
+    except ValueError:
+        _sync_preauthorization_plan(user, force=True)
+    validate_preauthorization_target(
+        user,
+        target_date=target_date,
+        target_type=target_type,
+    )
+    if session is not None:
+        existing = session.exec(
+            select(ClockInPreauthorization).where(
+                (ClockInPreauthorization.tenant_id == user.tenant_id)
+                & (ClockInPreauthorization.user_id == user.id)
+                & (ClockInPreauthorization.target_date == target_date)
+                & (ClockInPreauthorization.target_type == target_type)
+                & (ClockInPreauthorization.status == "authorized")
+            )
+        ).first()
+        if existing is not None:
+            raise ValueError("该日期已有有效预授权")
+
+    api_client, config_data = _sync_preauthorization_plan(user, force=False)
+    validate_preauthorization_target(
+        user,
+        target_date=target_date,
+        target_type=target_type,
+    )
+    registration = api_client.create_alipay_clockin_verification()
+    started_at = datetime.datetime.now(BEIJING_TZ)
+    direct_url, browser_url = build_alipay_open_urls(
+        str(registration.get("registerUrl") or ""),
+        account=str(user.phone or ""),
+        started_at=started_at,
+    )
+    registration_ticket = issue_registration_ticket(
+        tenant_id=user.tenant_id,
+        user_id=int(user.id),
+        target_date=target_date,
+        target_type=target_type,
+        out_register_no=str(registration.get("outRegisterNo") or ""),
+        started_at=started_at,
+    )
+    return {
+        "registration_ticket": registration_ticket,
+        "direct_url": direct_url,
+        "browser_url": browser_url,
+        "started_at": started_at.isoformat(),
+        "expires_at": (
+            started_at
+            + datetime.timedelta(seconds=REGISTRATION_TICKET_TTL_SECONDS)
+        ).isoformat(),
+    }
+
+
+def _serialize_preauthorization_record(
+    row: ClockInPreauthorization,
+) -> Dict[str, Any]:
+    return {
+        "id": row.id,
+        "target_date": row.target_date.isoformat(),
+        "target_type": row.target_type,
+        "status": row.status,
+        "authorized_at": row.authorized_at.isoformat(),
+        "consumed_at": row.consumed_at.isoformat() if row.consumed_at else None,
+        "used_target_type": row.used_target_type,
+    }
+
+
+def _complete_clockin_preauthorization_for_user(
+    session: Session,
+    user: User,
+    registration_ticket: str,
+) -> Dict[str, Any]:
+    row = complete_preauthorization(
+        session,
+        user=user,
+        ticket=str(registration_ticket or "").strip(),
+    )
+    return _serialize_preauthorization_record(row)
+
+
 def _continue_alipay_clockin_for_user(
     user: User,
     out_register_no: str,
@@ -848,10 +1058,23 @@ def _makeup_clockin_for_user(user: User, target_dates: List[str], target_type: s
     _ensure_remote_runtime(api_client, config)
     if hasattr(api_client, "enable_proxy"):
         api_client.enable_proxy()
+    preauthorization_hooks = build_preauthorization_hooks(user, db_engine=engine)
     if len(target_dates) == 1:
-        result = perform_clock_in_makeup(api_client, config, target_dates[0], target_type=target_type)
+        result = perform_clock_in_makeup(
+            api_client,
+            config,
+            target_dates[0],
+            target_type=target_type,
+            preauthorization_hooks=preauthorization_hooks,
+        )
     else:
-        result = perform_clock_in_makeup_many(api_client, config, target_dates, target_type=target_type)
+        result = perform_clock_in_makeup_many(
+            api_client,
+            config,
+            target_dates,
+            target_type=target_type,
+            preauthorization_hooks=preauthorization_hooks,
+        )
     apply_execution_results_to_user(user, [result], config_data)
     return result, config_data
 
@@ -1539,6 +1762,7 @@ def app_run(
         specific_task_type=specific_task_type,
         force_report=bool(req.force_report) if req else False,
         target_period=req.target_period if req else None,
+        preauthorization_hooks=build_preauthorization_hooks(user, db_engine=engine),
     )
     status = apply_execution_results_to_user(user, results, config_data)
     session.add(AuditLog(tenant_id=user.tenant_id, actor=str(payload.get("sub")), action="app.user.run", target_user_id=user.id, detail={"status": status}))
@@ -1578,6 +1802,119 @@ def app_continue_alipay_clockin(
     session.add(user)
     session.commit()
     return {"result": result}
+
+
+@router.get(
+    "/app/clock-in/preauthorizations",
+    response_model=ClockInPreauthorizationListResponse,
+)
+def app_clockin_preauthorizations(
+    *,
+    request: Request,
+    scope: str = Query("future"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    status: Optional[str] = Query(None),
+    target_type: Optional[str] = Query(None),
+    refresh_plan: bool = Query(False),
+    session: Session = Depends(get_session),
+    payload: dict = Depends(get_user),
+):
+    app_user = _get_authed_app_user(session=session, payload=payload)
+    user = _get_bound_task_user(session=session, app_user=app_user)
+    client_ip = get_client_ip(request)
+    _rate_limit(f"app_preauthorization_list:{client_ip}:{user.id}", limit=30, per_seconds=60)
+    try:
+        return _list_clockin_preauthorizations_for_user(
+            session,
+            user,
+            scope=scope,
+            page=page,
+            page_size=page_size,
+            status=status,
+            target_type=target_type,
+            refresh_plan=refresh_plan,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post(
+    "/app/clock-in/preauthorizations/start",
+    response_model=ClockInPreauthorizationStartResponse,
+)
+def app_start_clockin_preauthorization(
+    *,
+    request: Request,
+    req: ClockInPreauthorizationStartRequest,
+    session: Session = Depends(get_session),
+    payload: dict = Depends(get_user),
+):
+    app_user = _get_authed_app_user(session=session, payload=payload)
+    user = _get_bound_task_user(session=session, app_user=app_user)
+    client_ip = get_client_ip(request)
+    _rate_limit(f"app_preauthorization_start:{client_ip}:{user.id}", limit=5, per_seconds=60)
+    try:
+        result = _start_clockin_preauthorization_for_user(user, req, session=session)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    target_date, target_type = _preauthorization_target_values(req)
+    session.add(user)
+    session.add(
+        AuditLog(
+            tenant_id=user.tenant_id,
+            actor=str(payload.get("sub")),
+            action="app.clockin.preauthorization.start",
+            target_user_id=user.id,
+            detail={
+                "target_date": target_date.isoformat(),
+                "target_type": target_type,
+                "status": "started",
+            },
+        )
+    )
+    session.commit()
+    return result
+
+
+@router.post(
+    "/app/clock-in/preauthorizations/complete",
+    response_model=ClockInPreauthorizationCompleteResponse,
+)
+def app_complete_clockin_preauthorization(
+    *,
+    request: Request,
+    req: ClockInPreauthorizationCompleteRequest,
+    session: Session = Depends(get_session),
+    payload: dict = Depends(get_user),
+):
+    app_user = _get_authed_app_user(session=session, payload=payload)
+    user = _get_bound_task_user(session=session, app_user=app_user)
+    client_ip = get_client_ip(request)
+    _rate_limit(f"app_preauthorization_complete:{client_ip}:{user.id}", limit=10, per_seconds=60)
+    try:
+        result = _complete_clockin_preauthorization_for_user(
+            session,
+            user,
+            req.registration_ticket,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    session.add(
+        AuditLog(
+            tenant_id=user.tenant_id,
+            actor=str(payload.get("sub")),
+            action="app.clockin.preauthorization.complete",
+            target_user_id=user.id,
+            detail={
+                "target_date": result["target_date"],
+                "target_type": result["target_type"],
+                "status": result["status"],
+            },
+        )
+    )
+    session.commit()
+    return {"item": result}
 
 
 @router.get("/app/execution")
@@ -3299,6 +3636,7 @@ def run_user_task(
             specific_task_type=specific_task_type,
             force_report=bool(req.force_report) if req else False,
             target_period=req.target_period if req else None,
+            preauthorization_hooks=build_preauthorization_hooks(user, db_engine=engine),
         )
         status = apply_execution_results_to_user(user, results, config_data)
         response_payload = {"results": results}
@@ -3362,6 +3700,119 @@ def continue_user_alipay_clockin(
     session.add(user)
     session.commit()
     return {"result": result}
+
+
+@router.get(
+    "/users/{user_id}/clock-in/preauthorizations",
+    response_model=ClockInPreauthorizationListResponse,
+)
+def read_user_clockin_preauthorizations(
+    *,
+    request: Request,
+    user_id: int,
+    scope: str = Query("future"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    status: Optional[str] = Query(None),
+    target_type: Optional[str] = Query(None),
+    refresh_plan: bool = Query(False),
+    session: Session = Depends(get_session),
+    operator: dict = Depends(require_tasks_run),
+):
+    user = _get_active_user_for_payload(session, user_id, operator)
+    client_ip = get_client_ip(request)
+    _rate_limit(f"preauthorization_list:{client_ip}:{user_id}", limit=30, per_seconds=60)
+    try:
+        return _list_clockin_preauthorizations_for_user(
+            session,
+            user,
+            scope=scope,
+            page=page,
+            page_size=page_size,
+            status=status,
+            target_type=target_type,
+            refresh_plan=refresh_plan,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post(
+    "/users/{user_id}/clock-in/preauthorizations/start",
+    response_model=ClockInPreauthorizationStartResponse,
+)
+def start_user_clockin_preauthorization(
+    *,
+    request: Request,
+    req: ClockInPreauthorizationStartRequest,
+    user_id: int,
+    session: Session = Depends(get_session),
+    operator: dict = Depends(require_tasks_run),
+):
+    user = _get_active_user_for_payload(session, user_id, operator)
+    client_ip = get_client_ip(request)
+    _rate_limit(f"preauthorization_start:{client_ip}:{user_id}", limit=5, per_seconds=60)
+    try:
+        result = _start_clockin_preauthorization_for_user(user, req, session=session)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    target_date, target_type = _preauthorization_target_values(req)
+    session.add(user)
+    session.add(
+        AuditLog(
+            tenant_id=user.tenant_id,
+            actor=str(operator.get("sub")),
+            action="user.clockin.preauthorization.start",
+            target_user_id=user.id,
+            detail={
+                "target_date": target_date.isoformat(),
+                "target_type": target_type,
+                "status": "started",
+            },
+        )
+    )
+    session.commit()
+    return result
+
+
+@router.post(
+    "/users/{user_id}/clock-in/preauthorizations/complete",
+    response_model=ClockInPreauthorizationCompleteResponse,
+)
+def complete_user_clockin_preauthorization(
+    *,
+    request: Request,
+    req: ClockInPreauthorizationCompleteRequest,
+    user_id: int,
+    session: Session = Depends(get_session),
+    operator: dict = Depends(require_tasks_run),
+):
+    user = _get_active_user_for_payload(session, user_id, operator)
+    client_ip = get_client_ip(request)
+    _rate_limit(f"preauthorization_complete:{client_ip}:{user_id}", limit=10, per_seconds=60)
+    try:
+        result = _complete_clockin_preauthorization_for_user(
+            session,
+            user,
+            req.registration_ticket,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    session.add(
+        AuditLog(
+            tenant_id=user.tenant_id,
+            actor=str(operator.get("sub")),
+            action="user.clockin.preauthorization.complete",
+            target_user_id=user.id,
+            detail={
+                "target_date": result["target_date"],
+                "target_type": result["target_type"],
+                "status": result["status"],
+            },
+        )
+    )
+    session.commit()
+    return {"item": result}
 
 
 class BatchRunRequest(BaseModel):

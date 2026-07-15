@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from server.task_runner import run_task_by_config
+from server.clockin_preauthorization import build_preauthorization_hooks
 from server.database import engine
 from server.models import DEFAULT_TENANT_ID, Tenant, User
 from server.user_runtime import apply_execution_results_to_user, user_to_config as build_user_config
@@ -119,6 +120,7 @@ def run_job(user_id: int, forced_checkin_type: str):
                 logger.warning("invalid schedule startDate for user %s: %r (%s)", user_id, start_date, exc)
             
         config_data = user_to_config(user)
+        preauthorization_hooks = build_preauthorization_hooks(user, db_engine=engine)
 
     lock_key = f"scheduler:user:{user_id}:clock_in:{forced_checkin_type}"
     lock_token = acquire_task_lock(
@@ -142,7 +144,11 @@ def run_job(user_id: int, forced_checkin_type: str):
     status = "success"
     error = None
     try:
-        results = run_task_by_config(config_data, forced_checkin_type=forced_checkin_type)
+        results = run_task_by_config(
+            config_data,
+            forced_checkin_type=forced_checkin_type,
+            preauthorization_hooks=preauthorization_hooks,
+        )
         
         # 更新状态
         with Session(engine) as session:

@@ -267,6 +267,26 @@ def _rows_for_user(
     return rows, added_date, plan_end_date, start_time, end_time
 
 
+def validate_preauthorization_target(
+    user: User,
+    *,
+    target_date: datetime.date,
+    target_type: str,
+    today: datetime.date | None = None,
+) -> PreauthorizationRow:
+    normalized_type = str(target_type or "").strip().upper()
+    if normalized_type not in VALID_TARGET_TYPES:
+        raise ValueError("预授权类型错误")
+    rows, _, _, _, _ = _rows_for_user(
+        user,
+        today=today or datetime.datetime.now(BEIJING_TZ).date(),
+    )
+    for row in rows:
+        if row.target_date == target_date and row.target_type == normalized_type:
+            return row
+    raise ValueError("目标日期或类型不在预授权列表中")
+
+
 def _iso_datetime(value: datetime.datetime | None) -> str | None:
     return value.isoformat() if isinstance(value, datetime.datetime) else None
 

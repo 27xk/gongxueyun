@@ -398,7 +398,7 @@ git commit -m "feat(打卡): 在 304 后消费预授权"
 - 修改：`tests/test_scheduler_hardening.py`
 - 修改：`tests/test_alipay_clockin_verification.py`
 
-- [ ] **步骤 1：编写双端 API 失败测试**
+- [x] **步骤 1：编写双端 API 失败测试**
 
 使用 FastAPI `TestClient` 和依赖覆盖验证 6 个路由：
 
@@ -418,17 +418,19 @@ def test_app_start_returns_two_urls_without_persisting(self):
 
 为调度器增加测试，断言 `run_job` 调用 `run_task_by_config(..., preauthorization_hooks=...)`。为 `/app/run`、管理端立即运行、普通补卡和批量补卡增加 Hook 透传断言。
 
-- [ ] **步骤 2：运行 API 测试确认失败**
+- [x] **步骤 2：运行 API 测试确认失败**
 
 运行：
 
 ```powershell
-python -m dotenv -f "F:\code\szxm\automoguding-saas\.env" run -- python -m unittest tests.test_clockin_preauthorization_api tests.test_scheduler_hardening tests.test_alipay_clockin_verification
+python -m dotenv -f "F:\code\szxm\automoguding-saas\.env" run -- python -m unittest discover -s tests -p "test_clockin_preauthorization_api.py"
+python -m dotenv -f "F:\code\szxm\automoguding-saas\.env" run -- python -m unittest discover -s tests -p "test_scheduler_hardening.py"
+python -m dotenv -f "F:\code\szxm\automoguding-saas\.env" run -- python -m unittest discover -s tests -p "test_alipay_clockin_verification.py"
 ```
 
 预期：路由返回 `404`，运行入口没有 Hook。
 
-- [ ] **步骤 3：实现请求模型和共享处理函数**
+- [x] **步骤 3：实现请求模型和共享处理函数**
 
 在 `server/api.py` 增加：
 
@@ -447,11 +449,11 @@ class ClockInPreauthorizationCompleteRequest(BaseModel):
 
 在调度器和所有手动运行/补卡入口用 `build_preauthorization_hooks(user)` 注入 Hook；显式支付宝继续接口不注入。
 
-- [ ] **步骤 4：运行 API 和调度器测试确认通过**
+- [x] **步骤 4：运行 API 和调度器测试确认通过**
 
 运行步骤 2 的命令，预期所有路由、权限、同步和 Hook 测试通过。
 
-- [ ] **步骤 5：提交 API**
+- [x] **步骤 5：提交 API**
 
 ```powershell
 git add server/api.py server/scheduler.py tests/test_clockin_preauthorization_api.py tests/test_scheduler_hardening.py tests/test_alipay_clockin_verification.py
