@@ -4,6 +4,7 @@
       <div class="page-header">
         <div class="page-title">{{ isEdit ? '编辑用户' : '添加用户' }}</div>
         <div class="page-actions">
+          <el-button v-if="isEdit && canRun" type="primary" plain @click="goPreauthorization">预授权</el-button>
           <el-button @click="goBack">返回</el-button>
         </div>
       </div>
@@ -356,12 +357,15 @@
 import { ref, reactive, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { http } from '../api/http'
+import { useAuthStore } from '../stores/auth'
 import { parseCnDotAddress, formatCnDotAddress, formatNearbyAddressPlace } from '../utils/cnAddress'
 import { notifySuccess, notifyError, notifyWarning, notifyInfo, resolveErrorMessage } from '../utils/notify'
 
 const route = useRoute()
 const router = useRouter()
+const auth = useAuthStore()
 const isEdit = computed(() => !!route.params.id)
+const canRun = computed(() => auth.can('tasks:run'))
 const passwordPlaceholder = computed(() => '请输入工学云密码')
 const pushSecretPlaceholder = computed(() => '请输入')
 const loading = ref(false)
@@ -671,6 +675,11 @@ const normalizeSearchQuery = (q) => {
 const goBack = () => {
   notifyInfo('正在返回上一页')
   router.back()
+}
+
+const goPreauthorization = () => {
+  if (!isEdit.value || !canRun.value) return
+  router.push(`/users/${route.params.id}/preauthorizations`)
 }
 
 const searchPlace = async () => {

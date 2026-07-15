@@ -38,13 +38,20 @@ class ApiMakeupProxyScopeTest(unittest.TestCase):
         FakeApiClient.instances = []
 
     def test_manual_makeup_enables_proxy_after_runtime_refresh(self):
-        user = User(phone="13800000000", password="encrypted")
+        user = User(id=7, phone="13800000000", password="encrypted")
 
         def ensure_runtime(client, config):
             self.assertFalse(client.proxy_enabled)
 
-        def do_makeup(client, config, target_date, target_type=None):
+        def do_makeup(
+            client,
+            config,
+            target_date,
+            target_type=None,
+            preauthorization_hooks=None,
+        ):
             self.assertTrue(client.proxy_enabled)
+            self.assertIsNotNone(preauthorization_hooks)
             return {"status": "success", "task_type": "makeup", "message": "ok"}
 
         with (

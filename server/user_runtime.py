@@ -12,7 +12,14 @@ SUPPORTED_PUSH_TYPES = [SERVER_PUSH_TYPE, SMTP_PUSH_TYPE]
 SMTP_HOST = "smtp.qq.com"
 SMTP_PORT = 465
 DEFAULT_SMTP_FROM = "工学云签到通知"
-SENSITIVE_EXECUTION_FIELDS = {"outRegisterNo", "registerUrl", "out_register_no"}
+SENSITIVE_EXECUTION_FIELDS = {
+    "outRegisterNo",
+    "registerUrl",
+    "out_register_no",
+    "registration_ticket",
+    "direct_url",
+    "browser_url",
+}
 
 
 def _json_copy(value: Any) -> Any:

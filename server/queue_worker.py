@@ -10,6 +10,7 @@ from sqlmodel import Session, select
 from sqlalchemy import update, case, func
 
 from server.batch_jobs import claim_batch_job_items, count_batch_job_items_by_status
+from server.clockin_preauthorization import build_preauthorization_hooks
 from server.database import engine
 from server.models import DEFAULT_TENANT_ID, BatchJob, BatchJobItem, Tenant, User, AuditLog
 from server.observability import record_task_event
@@ -251,7 +252,13 @@ def _run_item(job_id: int, item_id: int, lock_token: str | None = None) -> None:
         heartbeat_stop, heartbeat_thread = _start_item_lease_heartbeat(item_id, lock_token)
         try:
             config_data = user_to_config(user)
-            results = run_task_by_config(config_data)
+            results = run_task_by_config(
+                config_data,
+                preauthorization_hooks=build_preauthorization_hooks(
+                    user,
+                    db_engine=engine,
+                ),
+            )
             status = apply_execution_results_to_user(user, results, config_data)
             session.add(user)
             session.commit()

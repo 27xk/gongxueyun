@@ -24,6 +24,7 @@
 | `/` | 会话分流入口 | 管理员进入用户列表，用户进入 `/u`，未登录进入 `/u/login` |
 | `/create` | 新增用户页 | 创建用户与基础配置 |
 | `/edit/:id` | 用户编辑页 | 打卡、补卡、报告、单用户推送 |
+| `/users/:id/preauthorizations` | 用户预授权页 | 需要 `tasks:run`，按日期代用户完成预授权 |
 | `/audit` | 审计日志页 | 关键操作记录 |
 | `/settings` | 系统设置页 | AI、SMTP、工学云补卡代理 |
 | `/settings/notifications` | 通知设置页 | 全局邮箱通知 |
@@ -36,6 +37,7 @@
 | `/u/register` | 用户注册页 | 受后端注册开关控制 |
 | `/u` | 用户工作台 | 手动执行、执行记录、日报快捷入口 |
 | `/u/settings` | 我的配置 | 打卡、报告、补卡、个人推送 |
+| `/u/preauthorizations` | 打卡预授权 | 今天及未来上 / 下班授权、过去日期补卡授权 |
 
 用户端和管理端登录态不混用。管理端使用 `src/stores/auth.js`，用户端使用 `src/stores/userAuth.js`。
 
@@ -79,9 +81,32 @@
 
 `/edit/:id` 对应 `UserEdit.vue`。管理端可在同一页完成用户的打卡、补卡、报告和推送配置，和用户端页面保持同一套字段口径。
 
+### 打卡预授权页面
+
+用户端 `/u/preauthorizations` 和管理端 `/users/:id/preauthorizations` 复用同一套组件：
+
+| 组件 | 职责 |
+|------|------|
+| `ClockInPreauthorizationPage.vue` | 根据端类型选择 Axios 实例，管理列表、分页、历史折叠和授权生命周期 |
+| `ClockInPreauthorizationList.vue` | 桌面扁平表格、移动紧凑列表、4 种状态和行级操作 |
+| `ClockInPreauthorizationDialog.vue` | 校验两种 URL，打开支付宝，并显式确认「我已完成授权」 |
+| `views/user/UserPreauthorizations.vue` | 用户端薄包装页 |
+| `views/UserPreauthorizations.vue` | 管理端薄包装页，读取路由用户 ID |
+
+页面默认加载今天及未来列表，支持按状态和上 / 下班类型筛选；首次展开「过去日期与补卡」时才请求 `scope=past`，历史列表也可按状态筛选。过去日期每天只有 1 项，可用于上班或下班补卡；今天及未来每天有上班、下班两项。桌面和移动端共享相同数据，不会各自维护状态副本。
+
+开始授权响应只保存在组件内存。关闭对话框会立即清空签名票据和 URL；点击「我已完成授权」前不会调用完成接口。两种打开方式如下：
+
+| 方式 | 前端校验 | 打开行为 |
+|------|----------|----------|
+| 浏览器打开 | 必须以 `https://ds.alipay.com/` 开头 | 使用新窗口和 `noopener,noreferrer` |
+| 支付宝打开 | 必须以 `alipays://` 开头 | 交给系统协议处理器 |
+
+列表响应不包含登记编号、签名票据或 URL。前端不把这些值写入 `localStorage`、Pinia、路由参数或通知消息。
+
 ### 支付宝安全验证对话框
 
-`src/components/AlipayVerificationDialog.vue` 是管理端和用户端共享组件。登记编号和深链只保存在页面内存，不写入 `localStorage` 或 Pinia；前端只允许打开 `alipays://` 链接。
+`src/components/AlipayVerificationDialog.vue` 是没有可用预授权时的即时验证组件。即时登记编号和深链只保存在页面内存，不写入 `localStorage` 或 Pinia；前端只允许打开 `alipays://` 链接。
 
 | 调用端 | 触发响应 | 继续接口 |
 |--------|----------|----------|
@@ -128,6 +153,7 @@ VITE_API_PROXY_TARGET=http://127.0.0.1:8147 npm run dev
 | Cookie | 后端使用 HttpOnly Cookie；前端不把 token 放进 `localStorage` |
 | CSRF | 非安全方法由后端校验 CSRF，前端按 Axios 实例约定携带 |
 | 支付宝验证 | 两端复用共享对话框，继续接口按各自认证状态和用户范围调用 |
+| 打卡预授权 | 两端复用共享列表和授权对话框；临时票据与 URL 仅保存在组件内存 |
 
 ## 目录结构
 
@@ -150,3 +176,5 @@ VITE_API_PROXY_TARGET=http://127.0.0.1:8147 npm run dev
 | 打卡设置页内嵌地图显示异常 | 检查 `VITE_MAP_DISPLAY_URL` 是否可访问 |
 | 用户端登录后被带回登录页 | 检查用户端 cookie、后端会话和 `401` 处理 |
 | 管理端和用户端互相串号 | 检查是否同时打开了两套登录态，或浏览器残留旧 cookie |
+| 预授权页面返回 403 | 管理端确认当前账号具备 `tasks:run`；用户端确认绑定关系有效 |
+| 浏览器或支付宝按钮禁用 | 检查开始授权响应 URL 的协议和域名，不在前端绕过校验 |

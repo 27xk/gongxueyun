@@ -7,8 +7,6 @@ from sqlmodel import SQLModel, create_engine
 class ExecutionLockTest(unittest.TestCase):
     def setUp(self):
         self.engine = create_engine("sqlite://")
-        from server.models import TaskExecutionLock
-
         SQLModel.metadata.create_all(self.engine)
 
     def test_lock_blocks_second_owner_until_released(self):

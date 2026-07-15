@@ -228,6 +228,75 @@ class QueueWorkerLeaseTest(unittest.TestCase):
         self.assertEqual(item.status, "fail")
         self.assertIn("disabled", item.error)
 
+    def test_run_item_injects_user_preauthorization_hooks(self):
+        from server.queue_worker import _run_item
+
+        with Session(self.engine) as session:
+            user = User(phone="16600000000", password="encrypted")
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+            job = BatchJob(
+                created_by="operator",
+                status="running",
+                total=1,
+                concurrency=1,
+                user_ids=[user.id],
+            )
+            session.add(job)
+            session.commit()
+            session.refresh(job)
+            item = BatchJobItem(
+                job_id=job.id,
+                user_id=user.id,
+                status="running",
+                lock_token="live-token",
+                max_attempts=1,
+            )
+            session.add(item)
+            session.commit()
+            session.refresh(item)
+            user_id = user.id
+            job_id = job.id
+            item_id = item.id
+
+        hooks = object()
+        heartbeat_stop = unittest.mock.Mock()
+        config_data = {"config": {}}
+        captured_user_ids = []
+
+        def build_hooks_for_user(active_user, *, db_engine):
+            self.assertIs(db_engine, self.engine)
+            captured_user_ids.append(active_user.id)
+            return hooks
+
+        with (
+            patch("server.queue_worker.engine", self.engine),
+            patch("server.queue_worker.user_to_config", return_value=config_data),
+            patch(
+                "server.queue_worker.build_preauthorization_hooks",
+                side_effect=build_hooks_for_user,
+            ) as build_hooks,
+            patch("server.queue_worker.run_task_by_config", return_value=[]) as runner,
+            patch("server.queue_worker.apply_execution_results_to_user", return_value="Success"),
+            patch(
+                "server.queue_worker._start_item_lease_heartbeat",
+                return_value=(heartbeat_stop, None),
+            ),
+            patch("server.queue_worker._finalize_item"),
+        ):
+            _run_item(job_id, item_id, lock_token="live-token")
+
+        build_hooks.assert_called_once_with(
+            unittest.mock.ANY,
+            db_engine=self.engine,
+        )
+        self.assertEqual(captured_user_ids, [user_id])
+        runner.assert_called_once_with(
+            config_data,
+            preauthorization_hooks=hooks,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

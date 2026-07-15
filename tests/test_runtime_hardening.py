@@ -5,7 +5,6 @@ from unittest.mock import patch
 
 from server import auth
 from server.coreApi.AiServiceClient import generate_article
-from server.models import RateLimitEvent
 from server.rate_limit import check_rate_limit, clear_memory_rate_limits
 from server.util.Config import ConfigManager
 from sqlmodel import SQLModel, create_engine

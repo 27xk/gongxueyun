@@ -8,6 +8,7 @@
         </div>
         <div class="user-actions">
           <el-button plain @click="router.push('/u')">首页</el-button>
+          <el-button plain @click="router.push('/u/preauthorizations')">预授权</el-button>
           <el-button plain @click="router.push('/u/settings')">设置</el-button>
           <el-button type="danger" plain @click="logout">退出</el-button>
         </div>

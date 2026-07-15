@@ -140,6 +140,7 @@ def issue_token(
     ttl_seconds: int = 12 * 60 * 60,
     tenant_id: str = DEFAULT_TENANT_ID,
     token_version: int | None = None,
+    extra_claims: dict | None = None,
 ) -> str:
     payload = {
         "sub": subject,
@@ -149,6 +150,9 @@ def issue_token(
     }
     if token_version is not None:
         payload["ver"] = int(token_version or 0)
+    for key, value in (extra_claims or {}).items():
+        if key not in {"sub", "role", "tenant_id", "exp", "ver"}:
+            payload[key] = value
     payload_b64 = _b64url_encode(json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
     sig = hmac.new(_secret(), payload_b64.encode("utf-8"), hashlib.sha256).digest()
     sig_b64 = _b64url_encode(sig)

@@ -428,6 +428,158 @@
         "tags": []
       }
     },
+    "/api/app/clock-in/preauthorizations": {
+      "get": {
+        "operation_id": "app_clockin_preauthorizations_api_app_clock_in_preauthorizations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "refresh_plan",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "target_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        ],
+        "request_body": {
+          "content": {},
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "$ref": "#/components/schemas/ClockInPreauthorizationListResponse"
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "$ref": "#/components/schemas/HTTPValidationError"
+              }
+            }
+          }
+        },
+        "tags": []
+      }
+    },
+    "/api/app/clock-in/preauthorizations/complete": {
+      "post": {
+        "operation_id": "app_complete_clockin_preauthorization_api_app_clock_in_preauthorizations_complete_post",
+        "parameters": [],
+        "request_body": {
+          "content": {
+            "application/json": {
+              "$ref": "#/components/schemas/ClockInPreauthorizationCompleteRequest"
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "$ref": "#/components/schemas/ClockInPreauthorizationCompleteResponse"
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "$ref": "#/components/schemas/HTTPValidationError"
+              }
+            }
+          }
+        },
+        "tags": []
+      }
+    },
+    "/api/app/clock-in/preauthorizations/start": {
+      "post": {
+        "operation_id": "app_start_clockin_preauthorization_api_app_clock_in_preauthorizations_start_post",
+        "parameters": [],
+        "request_body": {
+          "content": {
+            "application/json": {
+              "$ref": "#/components/schemas/ClockInPreauthorizationStartRequest"
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "$ref": "#/components/schemas/ClockInPreauthorizationStartResponse"
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "$ref": "#/components/schemas/HTTPValidationError"
+              }
+            }
+          }
+        },
+        "tags": []
+      }
+    },
     "/api/app/execution": {
       "get": {
         "operation_id": "app_execution_api_app_execution_get",
@@ -1769,6 +1921,184 @@
         "tags": []
       }
     },
+    "/api/users/{user_id}/clock-in/preauthorizations": {
+      "get": {
+        "operation_id": "read_user_clockin_preauthorizations_api_users__user_id__clock_in_preauthorizations_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "refresh_plan",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "target_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        ],
+        "request_body": {
+          "content": {},
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "$ref": "#/components/schemas/ClockInPreauthorizationListResponse"
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "$ref": "#/components/schemas/HTTPValidationError"
+              }
+            }
+          }
+        },
+        "tags": []
+      }
+    },
+    "/api/users/{user_id}/clock-in/preauthorizations/complete": {
+      "post": {
+        "operation_id": "complete_user_clockin_preauthorization_api_users__user_id__clock_in_preauthorizations_complete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "request_body": {
+          "content": {
+            "application/json": {
+              "$ref": "#/components/schemas/ClockInPreauthorizationCompleteRequest"
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "$ref": "#/components/schemas/ClockInPreauthorizationCompleteResponse"
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "$ref": "#/components/schemas/HTTPValidationError"
+              }
+            }
+          }
+        },
+        "tags": []
+      }
+    },
+    "/api/users/{user_id}/clock-in/preauthorizations/start": {
+      "post": {
+        "operation_id": "start_user_clockin_preauthorization_api_users__user_id__clock_in_preauthorizations_start_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "request_body": {
+          "content": {
+            "application/json": {
+              "$ref": "#/components/schemas/ClockInPreauthorizationStartRequest"
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "$ref": "#/components/schemas/ClockInPreauthorizationStartResponse"
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "$ref": "#/components/schemas/HTTPValidationError"
+              }
+            }
+          }
+        },
+        "tags": []
+      }
+    },
     "/api/users/{user_id}/execution": {
       "get": {
         "operation_id": "read_user_execution_api_users__user_id__execution_get",
@@ -2594,6 +2924,199 @@
       },
       "type": "object"
     },
+    "ClockInPreauthorizationCompleteRequest": {
+      "properties": {
+        "registration_ticket": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "registration_ticket"
+      ],
+      "type": "object"
+    },
+    "ClockInPreauthorizationCompleteResponse": {
+      "properties": {
+        "item": {
+          "$ref": "#/components/schemas/ClockInPreauthorizationItemResponse"
+        }
+      },
+      "required": [
+        "item"
+      ],
+      "type": "object"
+    },
+    "ClockInPreauthorizationItemResponse": {
+      "properties": {
+        "authorized_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "can_authorize": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "consumed_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "target_date": {
+          "type": "string"
+        },
+        "target_time": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target_type": {
+          "type": "string"
+        },
+        "used_target_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "target_date",
+        "target_type"
+      ],
+      "type": "object"
+    },
+    "ClockInPreauthorizationListResponse": {
+      "properties": {
+        "account": {
+          "type": "string"
+        },
+        "added_date": {
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/components/schemas/ClockInPreauthorizationItemResponse"
+          },
+          "type": "array"
+        },
+        "page": {
+          "type": "integer"
+        },
+        "page_size": {
+          "type": "integer"
+        },
+        "plan_end_date": {
+          "type": "string"
+        },
+        "schedule": {
+          "type": "object"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "object"
+        },
+        "total": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "account",
+        "added_date",
+        "items",
+        "page",
+        "page_size",
+        "plan_end_date",
+        "schedule",
+        "scope",
+        "summary",
+        "total"
+      ],
+      "type": "object"
+    },
+    "ClockInPreauthorizationStartRequest": {
+      "properties": {
+        "target_date": {
+          "type": "string"
+        },
+        "target_type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "target_date",
+        "target_type"
+      ],
+      "type": "object"
+    },
+    "ClockInPreauthorizationStartResponse": {
+      "properties": {
+        "browser_url": {
+          "type": "string"
+        },
+        "direct_url": {
+          "type": "string"
+        },
+        "expires_at": {
+          "type": "string"
+        },
+        "registration_ticket": {
+          "type": "string"
+        },
+        "started_at": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "browser_url",
+        "direct_url",
+        "expires_at",
+        "registration_ticket",
+        "started_at"
+      ],
+      "type": "object"
+    },
     "HTTPValidationError": {
       "properties": {
         "detail": {
@@ -3051,10 +3574,6 @@
     },
     "ValidationError": {
       "properties": {
-        "ctx": {
-          "type": "object"
-        },
-        "input": {},
         "loc": {
           "items": {
             "anyOf": [

@@ -78,7 +78,11 @@ class MigrationsContractTest(unittest.TestCase):
 
             columns = {item["name"] for item in inspect(engine).get_columns("user")}
             tables = set(inspect(engine).get_table_names())
+            preauthorization_columns = {
+                item["name"] for item in inspect(engine).get_columns("clockinpreauthorization")
+            }
             engine.dispose()
+
             self.assertIn("tenant", tables)
             self.assertIn("userInfo", columns)
             self.assertIn("planInfo", columns)
@@ -86,6 +90,11 @@ class MigrationsContractTest(unittest.TestCase):
             self.assertIn("deleted_at", columns)
             self.assertIn("deleted_by", columns)
             self.assertIn("delete_reason", columns)
+            self.assertIn("created_at", columns)
+            self.assertIn("clockinpreauthorization", tables)
+            self.assertIn("out_register_no", preauthorization_columns)
+            self.assertIn("target_date", preauthorization_columns)
+            self.assertIn("target_type", preauthorization_columns)
 
     def test_mfa_removal_revision_exists(self):
         root = Path(__file__).resolve().parents[1]
@@ -94,6 +103,20 @@ class MigrationsContractTest(unittest.TestCase):
         self.assertTrue(migration.exists())
         source = migration.read_text(encoding="utf-8")
         self.assertIn('down_revision = "20260527_0001"', source)
+
+    def test_clockin_preauthorization_revision_exists(self):
+        root = Path(__file__).resolve().parents[1]
+        migration = (
+            root
+            / "server"
+            / "migrations"
+            / "versions"
+            / "20260715_0003_clockin_preauthorization.py"
+        )
+
+        self.assertTrue(migration.exists())
+        source = migration.read_text(encoding="utf-8")
+        self.assertIn('down_revision = "20260530_0002"', source)
 
     def test_upgrade_existing_admin_table_drops_legacy_mfa_columns(self):
         root = Path(__file__).resolve().parents[1]

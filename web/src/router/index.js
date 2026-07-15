@@ -22,12 +22,21 @@ const routes = [
       { path: '', component: () => import('../views/user/UserSettings.vue'), meta: { area: 'user' } },
     ],
   },
+  {
+    path: '/u/preauthorizations',
+    component: () => import('../views/user/UserLayout.vue'),
+    meta: { area: 'user' },
+    children: [
+      { path: '', component: () => import('../views/user/UserPreauthorizations.vue'), meta: { area: 'user' } },
+    ],
+  },
   { path: '/', component: () => import('../views/UserList.vue'), meta: { permissions: ['users:read'] } },
   { path: '/audit', component: () => import('../views/AuditLogs.vue'), meta: { permissions: ['audit:read'] } },
   { path: '/settings', component: () => import('../views/NotificationSettings.vue'), meta: { permissions: ['settings:manage'] } },
   { path: '/settings/notifications', component: () => import('../views/NotificationSettings.vue'), meta: { permissions: ['settings:manage'] } },
   { path: '/create', component: () => import('../views/UserEdit.vue'), meta: { permissions: ['users:write'] } },
   { path: '/edit/:id', component: () => import('../views/UserEdit.vue'), meta: { permissions: ['users:write'] } },
+  { path: '/users/:id/preauthorizations', component: () => import('../views/UserPreauthorizations.vue'), meta: { permissions: ['tasks:run'] } },
 ]
 
 const router = createRouter({

@@ -258,6 +258,7 @@ class ApiClient:
     ApiClient类用于与远程服务器进行交互，包括用户登录、获取实习计划、获取打卡信息、提交打卡等功能。
     """
     BASE_URL = "https://api.moguding.net:9000/"
+    ALIPAY_VERIFICATION_CLIENT_ID = "428a8310cd442757ae699df5d89vmgh"
     DEFAULT_HEADERS = {
         "user-agent": "Dart/3.7 (dart:io)",
         "content-type": "application/json; charset=utf-8",
@@ -924,9 +925,11 @@ class ApiClient:
 
     def create_alipay_clockin_verification(self) -> Dict[str, str]:
         """创建支付宝打卡安全验证登记。"""
+        headers = self._get_authenticated_headers()
+        headers["client_id"] = self.ALIPAY_VERIFICATION_CLIENT_ID
         response = self._post_request(
             "usercenter/alipay/v1/createAxdjk",
-            self._get_authenticated_headers(),
+            headers,
             {"t": aes_encrypt(str(int(time.time() * 1000)))},
         )
         data = response.get("data") if isinstance(response, dict) else None
@@ -947,6 +950,8 @@ class ApiClient:
         register_url = register_url.strip()
         if not out_register_no or not register_url:
             raise ValueError("支付宝安全验证响应不完整")
+        if not re.fullmatch(r"[A-Za-z0-9-]{1,128}", out_register_no):
+            raise ValueError("支付宝安全验证登记编号无效")
         if (
             not register_url.startswith("alipays://")
             or urlparse(register_url).scheme.lower() != "alipays"
@@ -1027,8 +1032,9 @@ class ApiClient:
         if response.get("msg") == "302":
             raise ValueError("打卡失败，行为验证码未通过")
         if response.get("msg") == "304":
-            registration = self.create_alipay_clockin_verification()
-            return {"status": "verification_required", **registration}
+            return {"status": "verification_required"}
+        if response.get("code") != 200:
+            raise ValueError(str(response.get("msg") or "打卡失败"))
         return {"status": "success"}
 
     def submit_clock_in(self, checkin_info: Dict[str, Any]) -> Dict[str, str]:
