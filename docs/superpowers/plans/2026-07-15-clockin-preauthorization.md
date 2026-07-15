@@ -56,7 +56,7 @@
 - 修改：`tests/test_platform_foundations.py`
 - 创建：`tests/test_clockin_preauthorization.py`
 
-- [ ] **步骤 1：编写模型和迁移失败测试**
+- [x] **步骤 1：编写模型和迁移失败测试**
 
 在 `tests/test_clockin_preauthorization.py` 中断言模型默认值和唯一约束：
 
@@ -83,17 +83,19 @@ self.assertIn("out_register_no", preauthorization_columns)
 
 在 `tests/test_platform_foundations.py` 的备份恢复场景中插入一条预授权记录，恢复后断言 `out_register_no`、日期和状态保持一致。
 
-- [ ] **步骤 2：运行测试确认失败**
+- [x] **步骤 2：运行测试确认失败**
 
 运行：
 
 ```powershell
-python -m dotenv -f "F:\code\szxm\automoguding-saas\.env" run -- python -m unittest tests.test_clockin_preauthorization tests.test_migrations_contract tests.test_platform_foundations
+python -m dotenv -f "F:\code\szxm\automoguding-saas\.env" run -- python -m unittest discover -s tests -p "test_clockin_preauthorization.py"
+python -m dotenv -f "F:\code\szxm\automoguding-saas\.env" run -- python -m unittest discover -s tests -p "test_migrations_contract.py"
+python -m dotenv -f "F:\code\szxm\automoguding-saas\.env" run -- python -m unittest discover -s tests -p "test_platform_foundations.py"
 ```
 
 预期：导入 `ClockInPreauthorization` 失败，迁移表不存在。
 
-- [ ] **步骤 3：实现模型和迁移**
+- [x] **步骤 3：实现模型和迁移**
 
 在 `server/models.py` 中增加：
 
@@ -132,13 +134,13 @@ class ClockInPreauthorization(SQLModel, table=True):
 
 将 `ClockInPreauthorization` 放在 `User` 之后、`AuditLog` 之前加入 `BACKUP_MODELS`，确保恢复时用户先存在。
 
-- [ ] **步骤 4：运行聚焦测试确认通过**
+- [x] **步骤 4：运行聚焦测试确认通过**
 
 运行上一步测试命令。
 
 预期：所有模型、迁移和备份测试通过。
 
-- [ ] **步骤 5：提交数据库变更**
+- [x] **步骤 5：提交数据库变更**
 
 ```powershell
 git add server/models.py server/migrations/versions/20260715_0003_clockin_preauthorization.py server/backup.py tests/test_clockin_preauthorization.py tests/test_migrations_contract.py tests/test_platform_foundations.py

@@ -1,3 +1,4 @@
+import datetime
 import json
 import tempfile
 import unittest
@@ -301,11 +302,23 @@ class PlatformFoundationsTest(unittest.TestCase):
     def test_database_backup_exports_and_imports_core_tables(self):
         from server.backup import export_database_json, import_database_json
         from server.database import ensure_default_tenant
-        from server.models import Tenant, User
+        from server.models import ClockInPreauthorization, Tenant, User
+        from server.time_utils import utc_now
 
         ensure_default_tenant(self.engine)
         with Session(self.engine) as session:
-            session.add(User(phone="13800000000", password="encrypted", remark="backup"))
+            user = User(phone="13800000000", password="encrypted", remark="backup")
+            session.add(user)
+            session.flush()
+            session.add(
+                ClockInPreauthorization(
+                    user_id=user.id,
+                    target_date=datetime.date(2026, 7, 16),
+                    target_type="START",
+                    out_register_no="register-backup-1",
+                    authorized_at=utc_now(),
+                )
+            )
             session.commit()
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -313,6 +326,7 @@ class PlatformFoundationsTest(unittest.TestCase):
             summary = export_database_json(self.engine, backup_path)
 
             self.assertEqual(summary["tables"]["user"], 1)
+            self.assertEqual(summary["tables"]["clockinpreauthorization"], 1)
             payload = json.loads(backup_path.read_text(encoding="utf-8"))
             self.assertEqual(payload["format"], "automoguding-backup-v1")
             self.assertIn("manifest", payload)
@@ -326,7 +340,16 @@ class PlatformFoundationsTest(unittest.TestCase):
                 self.assertEqual(session.get(Tenant, "default").status, "active")
                 restored_user = session.exec(select(User).where(User.phone == "13800000000")).one()
                 self.assertEqual(restored_user.remark, "backup")
+                restored_preauthorization = session.exec(
+                    select(ClockInPreauthorization).where(
+                        ClockInPreauthorization.user_id == restored_user.id
+                    )
+                ).one()
+                self.assertEqual(restored_preauthorization.out_register_no, "register-backup-1")
+                self.assertEqual(restored_preauthorization.target_date, datetime.date(2026, 7, 16))
+                self.assertEqual(restored_preauthorization.status, "authorized")
             self.assertEqual(restore_summary["tables"]["user"], 1)
+            self.assertEqual(restore_summary["tables"]["clockinpreauthorization"], 1)
 
     def test_database_backup_rejects_tampered_payload(self):
         from server.backup import export_database_json, import_database_json

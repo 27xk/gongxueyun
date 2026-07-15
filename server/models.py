@@ -37,6 +37,7 @@ class User(UserBase, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     tenant_id: str = Field(default=DEFAULT_TENANT_ID, index=True)
+    created_at: datetime.datetime = Field(default_factory=utc_now, index=True)
     deleted_at: Optional[datetime.datetime] = Field(default=None, index=True)
     deleted_by: Optional[str] = Field(default=None, index=True)
     delete_reason: Optional[str] = None
@@ -47,6 +48,44 @@ class User(UserBase, table=True):
     ai: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     userInfo: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     planInfo: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+
+
+class ClockInPreauthorization(SQLModel, table=True):
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "user_id",
+            "target_date",
+            "target_type",
+            name="uq_clockinpreauthorization_target",
+        ),
+        Index(
+            "ix_clockinpreauthorization_user_date",
+            "tenant_id",
+            "user_id",
+            "target_date",
+        ),
+        Index(
+            "ix_clockinpreauthorization_user_status_date",
+            "tenant_id",
+            "user_id",
+            "status",
+            "target_date",
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    tenant_id: str = Field(default=DEFAULT_TENANT_ID)
+    user_id: int
+    target_date: datetime.date
+    target_type: str
+    status: str = "authorized"
+    out_register_no: str
+    authorized_at: datetime.datetime
+    consumed_at: Optional[datetime.datetime] = None
+    used_target_type: Optional[str] = None
+    created_at: datetime.datetime = Field(default_factory=utc_now)
+    updated_at: datetime.datetime = Field(default_factory=utc_now)
 
 class UserCreate(UserBase):
     pass
