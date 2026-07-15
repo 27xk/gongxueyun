@@ -3,10 +3,18 @@ import unittest
 from unittest.mock import patch
 from urllib.parse import parse_qsl, urlsplit
 
+from sqlalchemy.pool import StaticPool
+from sqlmodel import Session, SQLModel, create_engine, select
+
 from server.clockin_preauthorization import (
+    build_preauthorization_hooks,
     build_alipay_open_urls,
     build_preauthorization_rows,
+    claim_preauthorization,
+    complete_preauthorization,
     issue_registration_ticket,
+    list_preauthorizations,
+    mark_preauthorization_reauthorization_required,
     parse_plan_end_date,
     verify_registration_ticket,
 )
@@ -241,6 +249,301 @@ class ClockInPreauthorizationDomainTest(unittest.TestCase):
                     tenant_id="tenant-a",
                     user_id=7,
                 )
+
+
+class ClockInPreauthorizationStorageTest(unittest.TestCase):
+    def setUp(self):
+        self.engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        SQLModel.metadata.create_all(self.engine)
+        with Session(self.engine) as session:
+            user = User(
+                tenant_id="tenant-a",
+                phone="13800000000",
+                password="encrypted",
+                created_at=datetime.datetime(
+                    2026,
+                    7,
+                    13,
+                    tzinfo=datetime.timezone.utc,
+                ),
+                planInfo={"endTime": "2026-07-16 23:59:59"},
+                clockIn={
+                    "schedule": {
+                        "weekdays": [1, 2, 3, 4, 5],
+                        "startTime": "08:30",
+                        "endTime": "18:30",
+                    }
+                },
+            )
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+            self.user_id = user.id
+
+    def _user(self, session):
+        return session.get(User, self.user_id)
+
+    def _ticket(
+        self,
+        *,
+        target_date=datetime.date(2026, 7, 16),
+        target_type="START",
+        out_register_no="register-1",
+    ):
+        with patch("server.auth._secret", return_value=b"test-secret" * 4):
+            return issue_registration_ticket(
+                tenant_id="tenant-a",
+                user_id=self.user_id,
+                target_date=target_date,
+                target_type=target_type,
+                out_register_no=out_register_no,
+                started_at=datetime.datetime(2026, 7, 15, 10, 30, tzinfo=datetime.timezone.utc),
+            )
+
+    def test_complete_ticket_persists_only_after_confirmation(self):
+        ticket = self._ticket()
+        with Session(self.engine) as session:
+            self.assertEqual(session.exec(select(ClockInPreauthorization)).all(), [])
+            with patch("server.auth._secret", return_value=b"test-secret" * 4):
+                item = complete_preauthorization(
+                    session,
+                    user=self._user(session),
+                    ticket=ticket,
+                    today=datetime.date(2026, 7, 15),
+                )
+            session.commit()
+            item_status = item.status
+            item_register_no = item.out_register_no
+
+        self.assertEqual(item_status, "authorized")
+        self.assertEqual(item_register_no, "register-1")
+
+    def test_complete_same_ticket_is_idempotent(self):
+        ticket = self._ticket()
+        with Session(self.engine) as session, patch(
+            "server.auth._secret", return_value=b"test-secret" * 4
+        ):
+            first = complete_preauthorization(
+                session,
+                user=self._user(session),
+                ticket=ticket,
+                today=datetime.date(2026, 7, 15),
+            )
+            session.commit()
+            first_id = first.id
+            second = complete_preauthorization(
+                session,
+                user=self._user(session),
+                ticket=ticket,
+                today=datetime.date(2026, 7, 15),
+            )
+            session.commit()
+            second_id = second.id
+
+        self.assertEqual(second_id, first_id)
+        with Session(self.engine) as session:
+            self.assertEqual(len(session.exec(select(ClockInPreauthorization)).all()), 1)
+
+    def test_complete_different_ticket_does_not_overwrite_authorized_record(self):
+        first_ticket = self._ticket(out_register_no="register-1")
+        second_ticket = self._ticket(out_register_no="register-2")
+        with Session(self.engine) as session, patch(
+            "server.auth._secret", return_value=b"test-secret" * 4
+        ):
+            complete_preauthorization(
+                session,
+                user=self._user(session),
+                ticket=first_ticket,
+                today=datetime.date(2026, 7, 15),
+            )
+            session.commit()
+            with self.assertRaises(ValueError):
+                complete_preauthorization(
+                    session,
+                    user=self._user(session),
+                    ticket=second_ticket,
+                    today=datetime.date(2026, 7, 15),
+                )
+
+    def test_consumed_record_can_be_reauthorized(self):
+        first_ticket = self._ticket(out_register_no="register-1")
+        second_ticket = self._ticket(out_register_no="register-2")
+        with Session(self.engine) as session, patch(
+            "server.auth._secret", return_value=b"test-secret" * 4
+        ):
+            row = complete_preauthorization(
+                session,
+                user=self._user(session),
+                ticket=first_ticket,
+                today=datetime.date(2026, 7, 15),
+            )
+            row.status = "consumed"
+            row.consumed_at = utc_now()
+            session.add(row)
+            session.commit()
+            refreshed = complete_preauthorization(
+                session,
+                user=self._user(session),
+                ticket=second_ticket,
+                today=datetime.date(2026, 7, 15),
+            )
+            session.commit()
+            refreshed_values = (
+                refreshed.status,
+                refreshed.out_register_no,
+                refreshed.consumed_at,
+            )
+
+        self.assertEqual(refreshed_values[0], "authorized")
+        self.assertEqual(refreshed_values[1], "register-2")
+        self.assertIsNone(refreshed_values[2])
+
+    def test_consumed_record_rejects_replay_of_original_ticket(self):
+        ticket = self._ticket(out_register_no="register-1")
+        with Session(self.engine) as session, patch(
+            "server.auth._secret", return_value=b"test-secret" * 4
+        ):
+            complete_preauthorization(
+                session,
+                user=self._user(session),
+                ticket=ticket,
+                today=datetime.date(2026, 7, 15),
+            )
+            session.commit()
+        claim = claim_preauthorization(
+            self.engine,
+            tenant_id="tenant-a",
+            user_id=self.user_id,
+            target_date=datetime.date(2026, 7, 16),
+            target_type="START",
+        )
+        self.assertIsNotNone(claim)
+
+        with Session(self.engine) as session, patch(
+            "server.auth._secret", return_value=b"test-secret" * 4
+        ):
+            with self.assertRaises(ValueError):
+                complete_preauthorization(
+                    session,
+                    user=self._user(session),
+                    ticket=ticket,
+                    today=datetime.date(2026, 7, 15),
+                )
+
+        with Session(self.engine) as session:
+            row = session.get(ClockInPreauthorization, claim.id)
+            self.assertEqual(row.status, "consumed")
+
+    def test_claim_is_atomic_and_makeup_records_used_type(self):
+        ticket = self._ticket(
+            target_date=datetime.date(2026, 7, 14),
+            target_type="MAKEUP",
+        )
+        with Session(self.engine) as session, patch(
+            "server.auth._secret", return_value=b"test-secret" * 4
+        ):
+            complete_preauthorization(
+                session,
+                user=self._user(session),
+                ticket=ticket,
+                today=datetime.date(2026, 7, 15),
+            )
+            session.commit()
+
+        claim = claim_preauthorization(
+            self.engine,
+            tenant_id="tenant-a",
+            user_id=self.user_id,
+            target_date=datetime.date(2026, 7, 14),
+            target_type="MAKEUP",
+            used_target_type="END",
+        )
+        second = claim_preauthorization(
+            self.engine,
+            tenant_id="tenant-a",
+            user_id=self.user_id,
+            target_date=datetime.date(2026, 7, 14),
+            target_type="MAKEUP",
+            used_target_type="START",
+        )
+
+        self.assertEqual(claim.out_register_no, "register-1")
+        self.assertIsNone(second)
+        with Session(self.engine) as session:
+            row = session.get(ClockInPreauthorization, claim.id)
+            self.assertEqual(row.status, "consumed")
+            self.assertEqual(row.used_target_type, "END")
+            self.assertIsNotNone(row.consumed_at)
+
+    def test_mark_reauthorization_required_changes_consumed_claim(self):
+        ticket = self._ticket()
+        with Session(self.engine) as session, patch(
+            "server.auth._secret", return_value=b"test-secret" * 4
+        ):
+            complete_preauthorization(
+                session,
+                user=self._user(session),
+                ticket=ticket,
+                today=datetime.date(2026, 7, 15),
+            )
+            session.commit()
+        claim = claim_preauthorization(
+            self.engine,
+            tenant_id="tenant-a",
+            user_id=self.user_id,
+            target_date=datetime.date(2026, 7, 16),
+            target_type="START",
+        )
+
+        mark_preauthorization_reauthorization_required(self.engine, claim.id)
+
+        with Session(self.engine) as session:
+            row = session.get(ClockInPreauthorization, claim.id)
+            self.assertEqual(row.status, "reauthorize_required")
+
+    def test_list_joins_status_without_exposing_register_number(self):
+        ticket = self._ticket()
+        with Session(self.engine) as session, patch(
+            "server.auth._secret", return_value=b"test-secret" * 4
+        ):
+            complete_preauthorization(
+                session,
+                user=self._user(session),
+                ticket=ticket,
+                today=datetime.date(2026, 7, 15),
+            )
+            session.commit()
+            result = list_preauthorizations(
+                session,
+                self._user(session),
+                scope="future",
+                page=1,
+                page_size=20,
+                today=datetime.date(2026, 7, 15),
+            )
+
+        target = next(
+            item
+            for item in result["items"]
+            if item["target_date"] == "2026-07-16" and item["target_type"] == "START"
+        )
+        self.assertEqual(target["status"], "authorized")
+        self.assertEqual(result["summary"]["authorized"], 1)
+        self.assertNotIn("out_register_no", str(result))
+
+    def test_hooks_bind_claims_to_one_user(self):
+        with Session(self.engine) as session:
+            hooks = build_preauthorization_hooks(
+                self._user(session),
+                db_engine=self.engine,
+            )
+
+        self.assertEqual(hooks.tenant_id, "tenant-a")
+        self.assertEqual(hooks.user_id, self.user_id)
 
 
 if __name__ == "__main__":

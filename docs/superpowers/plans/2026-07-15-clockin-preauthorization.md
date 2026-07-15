@@ -254,7 +254,7 @@ git commit -m "feat(打卡): 实现预授权领域规则"
 - 修改：`server/clockin_preauthorization.py`
 - 修改：`tests/test_clockin_preauthorization.py`
 
-- [ ] **步骤 1：编写数据库生命周期失败测试**
+- [x] **步骤 1：编写数据库生命周期失败测试**
 
 使用 SQLite 内存数据库覆盖：
 
@@ -284,13 +284,13 @@ def test_claim_is_atomic_and_makeup_records_used_type(self):
 
 同时覆盖授权记录冲突、相同票据幂等、`consumed`/`reauthorize_required` 重新授权、状态汇总、分页和敏感字段不进入列表字典。
 
-- [ ] **步骤 2：运行测试确认失败**
+- [x] **步骤 2：运行测试确认失败**
 
 运行任务 2 的聚焦测试命令。
 
 预期：持久化和 claim 函数不存在。
 
-- [ ] **步骤 3：实现服务函数和 Hook**
+- [x] **步骤 3：实现服务函数和 Hook**
 
 实现以下公开边界：
 
@@ -304,11 +304,11 @@ def build_preauthorization_hooks(user: User, db_engine=engine) -> ClockInPreauth
 
 claim 使用单条带 `status = 'authorized'` 条件的 `UPDATE` 或 `SELECT ... FOR UPDATE` 加条件更新；只有影响 1 行时返回凭据。返回对象不得写日志或进入普通执行结果。
 
-- [ ] **步骤 4：运行测试确认通过**
+- [x] **步骤 4：运行测试确认通过**
 
 运行领域测试，预期所有状态和并发测试通过。
 
-- [ ] **步骤 5：提交凭据生命周期**
+- [x] **步骤 5：提交凭据生命周期**
 
 ```powershell
 git add server/clockin_preauthorization.py tests/test_clockin_preauthorization.py
