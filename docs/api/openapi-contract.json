@@ -3051,6 +3051,10 @@
     },
     "ValidationError": {
       "properties": {
+        "ctx": {
+          "type": "object"
+        },
+        "input": {},
         "loc": {
           "items": {
             "anyOf": [
