@@ -556,6 +556,16 @@ class PlatformFoundationsTest(unittest.TestCase):
             self.assertIn("AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-true}", compose, compose_name)
             self.assertIn("ENABLE_HSTS: ${ENABLE_HSTS:-true}", compose, compose_name)
 
+    def test_compose_forwards_runtime_schema_migration_switch(self):
+        for compose_name in ("docker-compose.yml", "docker-compose.image.yml"):
+            compose = (ROOT / compose_name).read_text(encoding="utf-8")
+
+            self.assertIn(
+                "ALLOW_RUNTIME_SCHEMA_MIGRATIONS: ${ALLOW_RUNTIME_SCHEMA_MIGRATIONS:-false}",
+                compose,
+                compose_name,
+            )
+
     def test_ci_runs_dependency_and_image_security_scans(self):
         workflow = (ROOT / ".github" / "workflows" / "docker-publish.yml").read_text(encoding="utf-8")
 
