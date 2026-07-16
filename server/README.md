@@ -48,7 +48,7 @@
 | 数据库 | `DATABASE_MAX_OVERFLOW` | `20` | 连接池溢出连接数 |
 | 数据库 | `DATABASE_POOL_RECYCLE_SECONDS` | `1800` | 回收 MySQL 空闲连接 |
 | 数据库 | `DATABASE_POOL_TIMEOUT_SECONDS` | `30` | 获取连接超时 |
-| 迁移 | `ALLOW_RUNTIME_SCHEMA_MIGRATIONS` | 生产 `false` | 是否允许应用启动时自动建表、补列、建索引 |
+| 迁移 | `ALLOW_RUNTIME_SCHEMA_MIGRATIONS` | 生产 `false` | 是否在启动时执行 Alembic `upgrade head`，随后运行兼容性结构处理 |
 | 进程 | `APP_ROLE` | 本地 `all` | `api` 只提供 Web / API；`worker` 只跑调度和队列 |
 | 管理员 | `ADMIN_USERNAME` | `admin` | 种子管理员账号 |
 | 管理员 | `ADMIN_PASSWORD` | 必填 | 生产不允许默认弱密码 |
@@ -328,6 +328,14 @@ MOGUDING_PROXY_API_URL=http://capi.51daili.com/traffic/getip?linePoolIndex=1&pac
 ## 数据库迁移
 
 迁移 `20260715_0003_clockin_preauthorization` 增加 `User.created_at` 和 `ClockInPreauthorization` 表。历史用户创建时间按以下顺序回填：最早的 `user.create` 审计时间、计划 `schedule.startDate`、迁移执行时间。
+
+`ALLOW_RUNTIME_SCHEMA_MIGRATIONS=true` 时，应用启动会先执行 Alembic `upgrade head`，
+再运行兼容性建表、补列和补索引，最后校验数据库修订。任一步失败都会终止启动，管理员、
+调度器和队列 worker 不会继续初始化。生产环境默认关闭自动迁移；多副本部署只应让一个
+实例开启该配置，或在发布阶段单独执行迁移。
+
+数据库仍停留在 `20260530_0002` 时缺少 `User.created_at` 和预授权表，访问预授权列表会
+因缺列或缺表失败。不要用 `SQLModel.metadata.create_all()` 代替 Alembic 版本升级。
 
 发布和回滚验证：
 

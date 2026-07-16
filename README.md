@@ -148,6 +148,11 @@ AutoMoGuDing SaaS 是一个自托管的工学云自动化平台，提供管理�
 | 启动前端 | `cd web && npm run dev` | Vite 默认 `5173`，`/api` 代理到后端 |
 | 修改代理目标 | `VITE_API_PROXY_TARGET=http://127.0.0.1:8147 npm run dev` | 后端不在默认地址时使用 |
 
+非生产环境默认允许运行时迁移；后端启动时会先执行 `alembic upgrade head`，再进行
+兼容性建表和索引检查。生产环境默认关闭该行为，建议发布前备份并显式执行迁移；如需由
+单实例在启动时升级，可设置 `ALLOW_RUNTIME_SCHEMA_MIGRATIONS=true`。迁移失败时应用会
+停止启动，不会在不完整的数据库结构上继续提供 API。
+
 Windows PowerShell：
 
 ```powershell

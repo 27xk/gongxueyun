@@ -10,6 +10,18 @@ from sqlalchemy import create_engine, inspect, text
 
 
 class MigrationsContractTest(unittest.TestCase):
+    def _run_alembic(self, root: Path, db_path: Path, *args: str) -> None:
+        env = dict(os.environ)
+        env["DATABASE_URL"] = f"sqlite:///{db_path}"
+        subprocess.run(
+            [sys.executable, "-m", "alembic", *args],
+            cwd=root,
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
     def test_alembic_files_exist(self):
         root = Path(__file__).resolve().parents[1]
 
@@ -65,16 +77,7 @@ class MigrationsContractTest(unittest.TestCase):
                 )
             engine.dispose()
 
-            env = dict(os.environ)
-            env["DATABASE_URL"] = f"sqlite:///{db_path}"
-            subprocess.run(
-                [sys.executable, "-m", "alembic", "upgrade", "head"],
-                cwd=root,
-                env=env,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
+            self._run_alembic(root, db_path, "upgrade", "head")
 
             columns = {item["name"] for item in inspect(engine).get_columns("user")}
             tables = set(inspect(engine).get_table_names())
@@ -95,6 +98,27 @@ class MigrationsContractTest(unittest.TestCase):
             self.assertIn("out_register_no", preauthorization_columns)
             self.assertIn("target_date", preauthorization_columns)
             self.assertIn("target_type", preauthorization_columns)
+
+    def test_upgrade_previous_head_adds_clockin_preauthorization_schema(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "previous-head.db"
+            self._run_alembic(root, db_path, "upgrade", "20260530_0002")
+            self._run_alembic(root, db_path, "upgrade", "head")
+
+            engine = create_engine(f"sqlite:///{db_path}")
+            inspector = inspect(engine)
+            user_columns = {item["name"] for item in inspector.get_columns("user")}
+            tables = set(inspector.get_table_names())
+            with engine.connect() as conn:
+                revision = conn.execute(
+                    text("SELECT version_num FROM alembic_version")
+                ).scalar_one()
+            engine.dispose()
+
+            self.assertIn("created_at", user_columns)
+            self.assertIn("clockinpreauthorization", tables)
+            self.assertEqual(revision, "20260715_0003")
 
     def test_mfa_removal_revision_exists(self):
         root = Path(__file__).resolve().parents[1]
@@ -140,16 +164,7 @@ class MigrationsContractTest(unittest.TestCase):
                 conn.execute(text("CREATE INDEX ix_adminuser_mfa_confirmed_at ON adminuser (mfa_confirmed_at)"))
             engine.dispose()
 
-            env = dict(os.environ)
-            env["DATABASE_URL"] = f"sqlite:///{db_path}"
-            subprocess.run(
-                [sys.executable, "-m", "alembic", "upgrade", "head"],
-                cwd=root,
-                env=env,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
+            self._run_alembic(root, db_path, "upgrade", "head")
 
             inspector = inspect(engine)
             columns = {item["name"] for item in inspector.get_columns("adminuser")}

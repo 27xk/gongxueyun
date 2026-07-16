@@ -48,13 +48,24 @@ def should_run_runtime_schema_migrations() -> bool:
     return app_env not in {"prod", "production"}
 
 
-def _alembic_script_directory():
+def _alembic_config():
     from alembic.config import Config
-    from alembic.script import ScriptDirectory
 
     config = Config(str(PROJECT_ROOT / "alembic.ini"))
     config.set_main_option("script_location", str(PROJECT_ROOT / "server" / "migrations"))
-    return ScriptDirectory.from_config(config)
+    return config
+
+
+def upgrade_database_schema_to_head() -> None:
+    from alembic import command
+
+    command.upgrade(_alembic_config(), "head")
+
+
+def _alembic_script_directory():
+    from alembic.script import ScriptDirectory
+
+    return ScriptDirectory.from_config(_alembic_config())
 
 
 def get_alembic_heads() -> set[str]:
