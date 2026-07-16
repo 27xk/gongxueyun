@@ -178,6 +178,23 @@ class PlatformFoundationsTest(unittest.TestCase):
         with patch.dict("os.environ", {"APP_ENV": "development"}, clear=False):
             self.assertTrue(should_run_runtime_schema_migrations())
 
+    def test_upgrade_database_schema_uses_project_alembic_head(self):
+        from server import database
+
+        with patch("alembic.command.upgrade") as upgrade:
+            database.upgrade_database_schema_to_head()
+
+        config, revision = upgrade.call_args.args
+        self.assertEqual(revision, "head")
+        self.assertEqual(
+            Path(config.config_file_name).resolve(),
+            (database.PROJECT_ROOT / "alembic.ini").resolve(),
+        )
+        self.assertEqual(
+            Path(config.get_main_option("script_location")).resolve(),
+            (database.PROJECT_ROOT / "server" / "migrations").resolve(),
+        )
+
     def test_database_schema_must_be_current_when_runtime_migrations_are_disabled(self):
         from server.database import require_database_schema_current
 
@@ -188,13 +205,66 @@ class PlatformFoundationsTest(unittest.TestCase):
         from server import main
 
         with patch("server.main.should_run_runtime_schema_migrations", return_value=False), \
+            patch("server.main.upgrade_database_schema_to_head") as upgrade_schema, \
             patch("server.main.require_database_schema_current") as require_current, \
             patch("server.main.ensure_seed_admin_users"), \
             patch("server.main._should_auto_download_captcha_models", return_value=False), \
             patch("server.main.should_start_background_services", return_value=False):
             main.on_startup()
 
+        upgrade_schema.assert_not_called()
         require_current.assert_called_once()
+
+    def test_startup_runs_alembic_before_runtime_compatibility(self):
+        from server import main
+
+        calls = []
+        with (
+            patch("server.main.should_run_runtime_schema_migrations", return_value=True),
+            patch(
+                "server.main.upgrade_database_schema_to_head",
+                side_effect=lambda: calls.append("alembic"),
+            ),
+            patch(
+                "server.main.create_db_and_tables",
+                side_effect=lambda: calls.append("compatibility"),
+            ),
+            patch(
+                "server.main.require_database_schema_current",
+                side_effect=lambda *_: calls.append("verify"),
+            ),
+            patch(
+                "server.main.ensure_seed_admin_users",
+                side_effect=lambda: calls.append("seed"),
+            ),
+            patch("server.main._should_auto_download_captcha_models", return_value=False),
+            patch("server.main.should_start_background_services", return_value=False),
+        ):
+            main.on_startup()
+
+        self.assertEqual(calls, ["alembic", "compatibility", "verify", "seed"])
+
+    def test_startup_stops_when_alembic_upgrade_fails(self):
+        from server import main
+
+        with (
+            patch("server.main.should_run_runtime_schema_migrations", return_value=True),
+            patch(
+                "server.main.upgrade_database_schema_to_head",
+                side_effect=RuntimeError("migration failed"),
+            ),
+            patch("server.main.create_db_and_tables") as create_tables,
+            patch("server.main.ensure_seed_admin_users") as seed_admins,
+            patch("server.main.start_scheduler") as start_scheduler,
+            patch("server.main.start_queue_worker") as start_worker,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "migration failed"):
+                main.on_startup()
+
+        create_tables.assert_not_called()
+        seed_admins.assert_not_called()
+        start_scheduler.assert_not_called()
+        start_worker.assert_not_called()
 
     def test_mysql_engine_uses_explicit_pool_settings(self):
         from server.database import _engine_options

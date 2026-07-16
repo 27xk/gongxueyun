@@ -9,7 +9,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from sqlalchemy import text
-from server.database import create_db_and_tables, engine, require_database_schema_current, should_run_runtime_schema_migrations
+from server.database import (
+    create_db_and_tables,
+    engine,
+    require_database_schema_current,
+    should_run_runtime_schema_migrations,
+    upgrade_database_schema_to_head,
+)
 from server.api import router
 from server.scheduler import is_scheduler_running, start_scheduler
 from server.admin_users import ensure_seed_admin_users
@@ -228,7 +234,9 @@ if origins:
     )
 def on_startup():
     if should_run_runtime_schema_migrations():
+        upgrade_database_schema_to_head()
         create_db_and_tables()
+        require_database_schema_current(engine)
     else:
         require_database_schema_current(engine)
         logger.info("runtime schema migrations are disabled; run alembic before startup")
